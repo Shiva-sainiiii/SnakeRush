@@ -122,10 +122,11 @@ html, body {
   opacity: 0.3;
 }
 
-/* Timer */
+/* Timer — matches the HUD's blue-teal palette instead of clashing green */
 #hud-timer {
   font-weight: 700;
-  color: #7effb2;
+  color: #7ee0ff;
+  text-shadow: 0 0 6px rgba(126,224,255,0.5);
   font-size: 0.88rem;
 }
 
@@ -150,12 +151,16 @@ html, body {
   inset: 0;
   z-index: 20;
   display: flex;
-  align-items: center;
+  /* flex-start (not center) so tall content always starts at the top and
+     scrolls downward — centering here was clipping the top of the panel
+     on mobile because the scroll container's origin sat mid-content. */
+  align-items: flex-start;
   justify-content: center;
   background: rgba(3,7,12,0.88);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   /* Respect safe-area so content never hides under notch or home indicator */
   padding:
     max(24px, calc(env(safe-area-inset-top) + 16px))
@@ -173,6 +178,10 @@ html, body {
   padding: 0 20px;
   width: 100%;
   max-width: 440px;
+  /* Pulls content to vertical center when it's shorter than the viewport
+     (e.g. desktop), but has zero effect once content overflows and the
+     parent starts scrolling — so nothing gets clipped on mobile. */
+  margin: auto 0;
 }
 
 #overlay-title {
@@ -607,7 +616,7 @@ html, body {
 }
 
 .life-heart {
-  font-size: 1rem;
+  font-size: 1.05rem;
   line-height: 1;
   transition: transform 0.15s ease, opacity 0.3s ease;
   filter: drop-shadow(0 0 4px rgba(255,80,80,0.8));
@@ -641,10 +650,12 @@ html, body {
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.04em;
-  padding: 2px 9px;
+  padding: 3px 11px;
   border-radius: 999px;
   white-space: nowrap;
   transition: opacity 0.3s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
 
 .powerup-badge.magnet {

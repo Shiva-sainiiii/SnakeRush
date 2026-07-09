@@ -145,7 +145,15 @@
 
   <canvas id="game-canvas" style="touch-action:none;"></canvas>
 
-  <script src="game.js"></script>
+  <!-- game.js was split into 5 files for maintainability. Load order matters:
+       part1 = utils/managers, part2 = entities (Snake/Food/etc),
+       part3 = Game class core, part4 = Game render methods (extends part3's
+       class via Object.assign(Game.prototype, ...)), part5 = boot. -->
+  <script src="game.part1.js"></script>
+  <script src="game.part2.js"></script>
+  <script src="game.part3.js"></script>
+  <script src="game.part4.js"></script>
+  <script src="game.part5.js"></script>
 
   <!-- HUD wiring for boost + powerup badges -->
   <script>
