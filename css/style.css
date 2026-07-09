@@ -1,1 +1,774 @@
+/* ─── Reset & Base ─────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #050a0f;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  color: #e0f0ff;
+  /* Prevent all default touch gestures globally; canvas gets its own touch-action */
+  touch-action: none;
+  /* Fill the safe area on iOS notch devices */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* ─── Canvas ────────────────────────────────────────────────── */
+#game-canvas {
+  display: block;
+  position: fixed;
+  /* Expand to fill the entire screen including under notches */
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  /* Extend behind safe areas so background color fills notch region */
+  margin: calc(-1 * env(safe-area-inset-top)) calc(-1 * env(safe-area-inset-right))
+          calc(-1 * env(safe-area-inset-bottom)) calc(-1 * env(safe-area-inset-left));
+  width: calc(100% + env(safe-area-inset-left) + env(safe-area-inset-right));
+  height: calc(100% + env(safe-area-inset-top) + env(safe-area-inset-bottom));
+  cursor: none;
+  touch-action: none; /* Critical: prevents passive-listener console warnings */
+}
+
+/* ─── HUD ───────────────────────────────────────────────────── */
+#hud {
+  position: fixed;
+  /* Push below the safe area (notch/dynamic island) */
+  top: max(10px, calc(env(safe-area-inset-top) + 6px));
+  /* Keep away from left/right safe areas and always centred */
+  left: max(8px, env(safe-area-inset-left));
+  right: max(8px, env(safe-area-inset-right));
+  /* Don't stretch full-width on tablets/desktop; cap it */
+  max-width: min(96vw, 600px);
+  /* Auto-centre between the safe-area margins */
+  margin: 0 auto;
+  /* Layout */
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;           /* Items wrap on narrow viewports */
+  justify-content: center;
+  z-index: 10;
+  pointer-events: none;
+  /* Glassmorphism pill */
+  background: rgba(5,10,15,0.72);
+  border: 1px solid rgba(80,200,255,0.18);
+  border-radius: 999px;
+  padding: 6px 16px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  /* Typography */
+  font-size: clamp(0.62rem, 2.2vw, 0.82rem);
+  letter-spacing: 0.045em;
+  color: rgba(180,230,255,0.9);
+  /* Guard against overflowing past minimap on small screens */
+  box-sizing: border-box;
+}
+
+/* Tighter gap + smaller pill on very narrow portrait phones */
+@media (max-width: 479px) {
+  #hud {
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 14px;       /* Pill→rounded-rect on tiny screens */
+    font-size: 0.6rem;
+    letter-spacing: 0.03em;
+    /* Stay in a column-friendly 2-row grid rather than one long row */
+    flex-wrap: wrap;
+  }
+  /* Shrink separator dots on mobile so they don't eat horizontal space */
+  #hud span + span::before {
+    margin-right: 6px;
+  }
+  /* Boost label: just show the icon on tiny screens */
+  .hud-boost-off { font-size: 0.6rem; }
+  .hud-boost-on  { font-size: 0.6rem; }
+  /* Hearts slightly smaller */
+  .life-heart { font-size: 0.85rem; }
+  /* Power-up badges compact */
+  .powerup-badge { font-size: 0.6rem; padding: 1px 6px; }
+}
+
+#hud span {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Boost indicator states */
+.hud-boost-off {
+  color: rgba(160,210,255,0.45);
+  font-size: 0.75rem;
+}
+
+.hud-boost-on {
+  color: #ffd04b;
+  font-weight: 700;
+  text-shadow: 0 0 8px rgba(255,208,75,0.8);
+  animation: pulse-boost 0.4s ease-in-out infinite alternate;
+}
+
+@keyframes pulse-boost {
+  from { opacity: 0.8; }
+  to   { opacity: 1;   }
+}
+
+/* Separator dots between HUD items */
+#hud span + span::before {
+  content: '·';
+  margin-right: 10px;
+  opacity: 0.3;
+}
+
+/* Timer — matches the HUD's blue-teal palette instead of clashing green */
+#hud-timer {
+  font-weight: 700;
+  color: #7ee0ff;
+  text-shadow: 0 0 6px rgba(126,224,255,0.5);
+  font-size: 0.88rem;
+}
+
+#hud-timer.hud-timer-danger {
+  color: #ff4444 !important;
+  animation: pulse-danger 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes pulse-danger {
+  from { opacity: 0.8; }
+  to   { opacity: 1; text-shadow: 0 0 10px rgba(255,60,60,0.8); }
+}
+
+#hud-snakes-remaining {
+  color: #ff9a4b;
+  font-weight: 700;
+}
+
+/* ─── Overlay ───────────────────────────────────────────────── */
+#overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  /* flex-start (not center) so tall content always starts at the top and
+     scrolls downward — centering here was clipping the top of the panel
+     on mobile because the scroll container's origin sat mid-content. */
+  align-items: flex-start;
+  justify-content: center;
+  background: rgba(3,7,12,0.88);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* Respect safe-area so content never hides under notch or home indicator */
+  padding:
+    max(24px, calc(env(safe-area-inset-top) + 16px))
+    max(12px, env(safe-area-inset-right))
+    max(24px, calc(env(safe-area-inset-bottom) + 16px))
+    max(12px, env(safe-area-inset-left));
+}
+
+#overlay-content {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 0 20px;
+  width: 100%;
+  max-width: 440px;
+  /* Pulls content to vertical center when it's shorter than the viewport
+     (e.g. desktop), but has zero effect once content overflows and the
+     parent starts scrolling — so nothing gets clipped on mobile. */
+  margin: auto 0;
+}
+
+#overlay-title {
+  font-size: clamp(2.4rem, 8vw, 4.5rem);
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: #7effb2;
+  text-shadow:
+    0 0 18px rgba(126,255,178,0.7),
+    0 0 50px rgba(126,255,178,0.3);
+}
+
+#overlay-subtitle {
+  font-size: clamp(0.85rem, 2.5vw, 1rem);
+  color: rgba(180,230,255,0.65);
+  letter-spacing: 0.04em;
+}
+
+/* ── Mode Selector ────────────────────────────────────────── */
+#mode-selector {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(5,12,20,0.7);
+  border: 1px solid rgba(126,255,178,0.15);
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+
+.mode-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(126,255,178,0.55);
+}
+
+.mode-btns {
+  display: flex;
+  gap: 8px;
+}
+
+.mode-btn {
+  flex: 1;
+  padding: 7px 10px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  border-radius: 8px;
+  border: 1px solid rgba(126,255,178,0.2);
+  background: rgba(126,255,178,0.04);
+  color: rgba(160,220,255,0.6);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.mode-btn:hover {
+  border-color: rgba(126,255,178,0.4);
+  color: rgba(200,255,220,0.85);
+}
+
+.mode-btn.active {
+  background: rgba(126,255,178,0.18);
+  border-color: rgba(126,255,178,0.6);
+  color: #7effb2;
+  text-shadow: 0 0 5px rgba(126,255,178,0.4);
+}
+
+.mode-desc {
+  font-size: 0.75rem;
+  color: rgba(160,200,255,0.55);
+  line-height: 1.4;
+}
+
+/* ── Daily Challenge Badge ───────────────────────────────── */
+.daily-badge {
+  padding: 5px 16px;
+  background: rgba(255,200,50,0.12);
+  border: 1px solid rgba(255,200,50,0.4);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #ffd04b;
+  text-shadow: 0 0 8px rgba(255,208,75,0.6);
+  animation: pulse-daily 1.5s ease-in-out infinite alternate;
+}
+
+@keyframes pulse-daily {
+  from { box-shadow: 0 0 6px rgba(255,208,75,0.2); }
+  to   { box-shadow: 0 0 16px rgba(255,208,75,0.5); }
+}
+
+/* ── Player Name ─────────────────────────────────────────── */
+#player-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#player-name-display {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #7effb2;
+  cursor: pointer;
+  border-bottom: 1px dashed rgba(126,255,178,0.4);
+  padding-bottom: 2px;
+  transition: color 0.15s;
+}
+
+#player-name-display:hover {
+  color: #b0ffd8;
+}
+
+#player-name-input {
+  background: rgba(5,12,20,0.8);
+  border: 1px solid rgba(126,255,178,0.4);
+  border-radius: 6px;
+  color: #7effb2;
+  font-size: 0.88rem;
+  padding: 4px 10px;
+  outline: none;
+  width: 200px;
+}
+
+#player-name-input:focus {
+  border-color: rgba(126,255,178,0.8);
+  box-shadow: 0 0 8px rgba(126,255,178,0.3);
+}
+
+/* Controls list */
+#controls-hint {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: rgba(160,220,255,0.7);
+  background: rgba(126,255,178,0.06);
+  border: 1px solid rgba(126,255,178,0.12);
+  padding: 12px 24px;
+  border-radius: 10px;
+  text-align: left;
+  width: 100%;
+}
+
+#controls-hint li strong {
+  color: #ffd04b;
+}
+
+/* Score on game-over */
+#score-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.9rem;
+  color: rgba(200,240,255,0.7);
+  background: rgba(126,255,178,0.08);
+  border: 1px solid rgba(126,255,178,0.2);
+  padding: 12px 36px;
+  border-radius: 10px;
+}
+
+#final-score {
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: #7effb2;
+  line-height: 1.1;
+}
+
+/* Play button */
+#start-btn {
+  padding: 13px 52px;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #050a0f;
+  background: #7effb2;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  box-shadow: 0 0 24px rgba(126,255,178,0.5);
+}
+
+#start-btn:hover {
+  transform: scale(1.06);
+  box-shadow: 0 0 40px rgba(126,255,178,0.75);
+}
+
+#start-btn:active {
+  transform: scale(0.97);
+}
+
+/* ─── Settings Panel ────────────────────────────────────────── */
+#settings-panel {
+  width: 100%;
+  background: rgba(5,12,20,0.8);
+  border: 1px solid rgba(126,255,178,0.15);
+  border-radius: 12px;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(126,255,178,0.55);
+  border-bottom: 1px solid rgba(126,255,178,0.1);
+  padding-bottom: 10px;
+}
+
+.settings-icon {
+  font-size: 0.9rem;
+}
+
+/* Row: label + control side by side */
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* Variant: stacks vertically (for multi-button rows) */
+.setting-row--vertical {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.setting-label {
+  font-size: 0.82rem;
+  color: rgba(180,230,255,0.75);
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+}
+
+/* ── Mute toggle button ─────────────────────────────────────── */
+.toggle-btn {
+  padding: 4px 16px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  border-radius: 999px;
+  border: 1px solid rgba(126,255,178,0.35);
+  background: rgba(126,255,178,0.08);
+  color: rgba(126,255,178,0.6);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  min-width: 56px;
+}
+
+.toggle-btn.active {
+  background: rgba(126,255,178,0.2);
+  color: #7effb2;
+  border-color: rgba(126,255,178,0.6);
+  text-shadow: 0 0 6px rgba(126,255,178,0.5);
+}
+
+.toggle-btn:hover {
+  border-color: rgba(126,255,178,0.5);
+}
+
+/* Achievement count */
+.achievement-count {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #ffd04b;
+  letter-spacing: 0.04em;
+}
+
+/* ── Sensitivity slider ─────────────────────────────────────── */
+.slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+#setting-sensitivity {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 130px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(126,255,178,0.18);
+  outline: none;
+  cursor: pointer;
+}
+
+#setting-sensitivity::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #7effb2;
+  box-shadow: 0 0 6px rgba(126,255,178,0.7);
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+
+#setting-sensitivity::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+}
+
+#setting-sensitivity::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #7effb2;
+  border: none;
+  cursor: pointer;
+}
+
+#sensitivity-val {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: rgba(126,255,178,0.7);
+  min-width: 20px;
+  text-align: right;
+}
+
+/* ── Snake design selector ──────────────────────────────────── */
+.design-btns {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.design-btn {
+  padding: 5px 13px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  border-radius: 6px;
+  border: 1px solid rgba(126,255,178,0.2);
+  background: rgba(126,255,178,0.04);
+  color: rgba(160,220,255,0.6);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.design-btn:hover {
+  border-color: rgba(126,255,178,0.4);
+  color: rgba(200,255,220,0.85);
+}
+
+.design-btn.active {
+  background: rgba(126,255,178,0.18);
+  border-color: rgba(126,255,178,0.6);
+  color: #7effb2;
+  text-shadow: 0 0 5px rgba(126,255,178,0.4);
+}
+
+/* ── Stats Panel ─────────────────────────────────────────────── */
+#stats-panel {
+  width: 100%;
+  background: rgba(5,12,20,0.8);
+  border: 1px solid rgba(126,255,178,0.12);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.stats-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(126,255,178,0.55);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.stats-header:hover {
+  background: rgba(126,255,178,0.05);
+}
+
+.stats-arrow {
+  transition: transform 0.2s;
+}
+
+.stats-arrow.open {
+  transform: rotate(90deg);
+}
+
+#stats-body {
+  padding: 0 18px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: rgba(160,220,255,0.7);
+  border-bottom: 1px solid rgba(126,255,178,0.06);
+  padding: 3px 0;
+}
+
+.stat-row span:last-child {
+  font-weight: 700;
+  color: #7effb2;
+}
+
+/* ─── Utility ───────────────────────────────────────────────── */
+.hidden { display: none !important; }
+
+/* ─── Lives / HP Meter ──────────────────────────────────────── */
+#hud-lives {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.life-heart {
+  font-size: 1.05rem;
+  line-height: 1;
+  transition: transform 0.15s ease, opacity 0.3s ease;
+  filter: drop-shadow(0 0 4px rgba(255,80,80,0.8));
+}
+
+.life-heart.lost {
+  opacity: 0.22;
+  filter: none;
+  transform: scale(0.8);
+}
+
+/* Flash animation when a life is lost */
+@keyframes life-lost-flash {
+  0%   { background: rgba(255,60,60,0.38); }
+  100% { background: transparent; }
+}
+
+.life-lost-flash {
+  animation: life-lost-flash 0.45s ease-out forwards;
+}
+
+/* Power-up active badges on HUD */
+#hud-powerups {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.powerup-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 3px 11px;
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: opacity 0.3s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.powerup-badge.magnet {
+  background: rgba(80,180,255,0.18);
+  border: 1px solid rgba(80,180,255,0.5);
+  color: #52aaff;
+  text-shadow: 0 0 6px rgba(82,170,255,0.8);
+}
+
+.powerup-badge.attack {
+  background: rgba(255,60,60,0.18);
+  border: 1px solid rgba(255,80,80,0.55);
+  color: #ff5e5e;
+  text-shadow: 0 0 6px rgba(255,80,80,0.8);
+  animation: pulse-attack 0.5s ease-in-out infinite alternate;
+}
+
+.powerup-badge.shield {
+  background: rgba(160,216,255,0.15);
+  border: 1px solid rgba(160,216,255,0.55);
+  color: #a0d8ff;
+  text-shadow: 0 0 6px rgba(160,216,255,0.8);
+  animation: pulse-shield 0.8s ease-in-out infinite alternate;
+}
+
+.powerup-badge.ghost {
+  background: rgba(200,160,255,0.15);
+  border: 1px solid rgba(200,160,255,0.5);
+  color: #c8a0ff;
+  text-shadow: 0 0 6px rgba(200,160,255,0.8);
+}
+
+.powerup-badge.mine {
+  background: rgba(255,159,64,0.15);
+  border: 1px solid rgba(255,159,64,0.5);
+  color: #ff9f40;
+  text-shadow: 0 0 6px rgba(255,159,64,0.8);
+  animation: pulse-mine 0.6s ease-in-out infinite alternate;
+}
+
+.powerup-badge.speedboost {
+  background: rgba(255,255,128,0.15);
+  border: 1px solid rgba(255,255,128,0.5);
+  color: #ffff80;
+  text-shadow: 0 0 6px rgba(255,255,128,0.8);
+  animation: pulse-speed 0.3s ease-in-out infinite alternate;
+}
+
+@keyframes pulse-attack {
+  from { opacity: 0.75; box-shadow: 0 0 4px rgba(255,80,80,0.3); }
+  to   { opacity: 1;    box-shadow: 0 0 12px rgba(255,80,80,0.7); }
+}
+
+@keyframes pulse-shield {
+  from { box-shadow: 0 0 4px rgba(160,216,255,0.3); }
+  to   { box-shadow: 0 0 14px rgba(160,216,255,0.7); }
+}
+
+@keyframes pulse-mine {
+  from { opacity: 0.8; }
+  to   { opacity: 1; box-shadow: 0 0 10px rgba(255,159,64,0.5); }
+}
+
+@keyframes pulse-speed {
+  from { opacity: 0.8; }
+  to   { opacity: 1; box-shadow: 0 0 12px rgba(255,255,128,0.6); }
+}
+
+/* Controls hint additions */
+#controls-hint .hint-new {
+  color: rgba(200,255,200,0.75);
+  border-top: 1px solid rgba(126,255,178,0.12);
+  margin-top: 4px;
+  padding-top: 6px;
+}
+
+/* ── Best Score — game-over overlay ────────────────────────── */
+#best-score-display {
+  margin-top: 10px;
+  text-align: center;
+}
+
+#best-score-display p:first-child {
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: rgba(255,215,0,0.75);
+  text-transform: uppercase;
+  margin: 0;
+}
+
+#best-score-value {
+  font-size: 2.2rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  color: #ffd700;
+  text-shadow: 0 0 14px rgba(255,215,0,0.65);
+  margin: 2px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Best Score — HUD ───────────────────────────────────────── */
+#hud-best-score {
+  font-size: 0.78rem;
+  color: rgba(255,215,0,0.75);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+/* Victory screen */
+#overlay-title.victory {
+  color: #ffd700;
+  text-shadow:
+    0 0 18px rgba(255,215,0,0.8),
+    0 0 50px rgba(255,215,0,0.4);
+}
