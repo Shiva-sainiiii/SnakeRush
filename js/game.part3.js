@@ -860,7 +860,7 @@ class Game {
     p.magnetTimer = 0; p.attackTimer = 0; p.shieldTimer = 0;
     p.ghostTimer  = 0; p.mineTimer   = 0; p.speedBoostTimer = 0;
     p.iFrameTimer = IFRAME_DURATION;
-    this.audio.playEat();
+    this.audio.playLifeline();
   }
 
   /* ── KILL SNAKE ─────────────────────────────────────────── */
