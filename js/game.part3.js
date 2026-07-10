@@ -26,8 +26,15 @@ class Game {
 
     this.hudBestScore = document.getElementById('hud-best-score');
 
+    this.pauseBtn     = document.getElementById('pause-btn');
+    this.pauseOverlay = document.getElementById('pause-overlay');
+    this.resumeBtn    = document.getElementById('resume-btn');
+    this.restartBtn   = document.getElementById('restart-btn');
+    this.exitBtn      = document.getElementById('exit-btn');
+
     this.camX = 0; this.camY = 0;
     this.running = false;
+    this.paused  = false;
     this.snakes  = [];
     this.foods   = [];
     this.foodGrid  = null;
@@ -206,6 +213,31 @@ class Game {
 
   /* ── INPUT ──────────────────────────────────────────────── */
   _setupInput() {
+    // ── Pause / Resume / Restart / Exit ──────────────────────
+    if (this.pauseBtn) {
+      this.pauseBtn.addEventListener('click', () => {
+        if (this.running) this.pauseGame();
+      });
+    }
+    if (this.resumeBtn)  this.resumeBtn.addEventListener('click', () => this.resumeGame());
+    if (this.restartBtn) this.restartBtn.addEventListener('click', () => this.restartGame());
+    if (this.exitBtn)    this.exitBtn.addEventListener('click', () => this.exitToMenu());
+
+    // Auto-pause when the tab/app goes into the background, so the snake
+    // doesn't keep moving (and potentially die) with no input while the
+    // player isn't looking at the screen.
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && this.running && !this.paused) this.pauseGame();
+    });
+    window.addEventListener('blur', () => {
+      if (this.running && !this.paused) this.pauseGame();
+    });
+    document.addEventListener('keydown', e => {
+      if ((e.key === 'Escape' || e.key === 'p' || e.key === 'P') && this.running) {
+        if (this.paused) this.resumeGame(); else this.pauseGame();
+      }
+    });
+
     this._pointer = new Vector2(window.innerWidth / 2, window.innerHeight / 2);
     const isTouchDevice = 'ontouchstart' in window;
 
@@ -214,7 +246,7 @@ class Game {
       this._pointer.y = e.clientY;
     });
 
-    this.canvas.addEventListener('mousedown',  () => { if (this.running && this.player) this.player.boosting = true;  });
+    this.canvas.addEventListener('mousedown',  () => { if (this.running && !this.paused && this.player) this.player.boosting = true;  });
     this.canvas.addEventListener('mouseup',    () => { if (this.player) this.player.boosting = false; });
     this.canvas.addEventListener('mouseleave', () => { if (this.player) this.player.boosting = false; });
 
@@ -234,8 +266,8 @@ class Game {
       // a touchstart event with cancelable=false".  The canvas already has
       // touch-action:none in CSS which lets us call preventDefault safely.
       this.canvas.addEventListener('touchstart', e => {
-        // Don't intercept taps on the overlay/menu (running guard)
-        if (!this.running) return;
+        // Don't intercept taps on the overlay/menu, or while paused
+        if (!this.running || this.paused) return;
         e.preventDefault(); // prevent click-delay ghost tap on iOS
 
         for (const t of e.changedTouches) {
@@ -554,6 +586,15 @@ class Game {
     // crisp regardless of when the resize fires relative to rAF.
     this.ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
 
+    if (this.paused) {
+      // Keep lastTime fresh so that resuming doesn't produce one huge dt
+      // jump (which would look like the snake teleporting forward).
+      this._lastTime = timestamp;
+      this._render(); // keep last frame visible under the pause panel
+      this._rafId = requestAnimationFrame(this._boundLoop);
+      return;
+    }
+
     const rawDt = (timestamp - this._lastTime) / 1000;
     const dt    = Math.min(rawDt, 0.1);
     this._lastTime = timestamp;
@@ -838,6 +879,54 @@ class Game {
     // In time trial, hide hearts
     const hudLives = document.getElementById('hud-lives');
     if (hudLives) hudLives.style.visibility = this._mode === 'timetrial' ? 'hidden' : '';
+  }
+
+  /* ── PAUSE / RESUME / RESTART / EXIT ────────────────────── */
+  pauseGame() {
+    if (!this.running || this.paused) return;
+    this.paused = true;
+    // Freeze any held input so the snake doesn't keep boosting/turning
+    // once we resume, based on stale touch/mouse state.
+    if (this.player) this.player.boosting = false;
+    this._joystick.active = false;
+    this._joystickTouchId = null;
+    this.audio.stopRun();
+    // Background music keeps playing softly; panic loop pauses with the game.
+    this.audio.stopPanic();
+    if (this.pauseOverlay) this.pauseOverlay.classList.remove('hidden');
+  }
+
+  resumeGame() {
+    if (!this.running || !this.paused) return;
+    this.paused = false;
+    if (this.pauseOverlay) this.pauseOverlay.classList.add('hidden');
+    // Re-sync lastTime right away too (loop also does this defensively).
+    this._lastTime = performance.now();
+  }
+
+  restartGame() {
+    if (this.pauseOverlay) this.pauseOverlay.classList.add('hidden');
+    this.paused = false;
+    if (this._rafId) cancelAnimationFrame(this._rafId);
+    this.audio.stopBg(); this.audio.stopPanic(); this.audio.stopRun();
+    this.startGame();
+  }
+
+  exitToMenu() {
+    if (this.pauseOverlay) this.pauseOverlay.classList.add('hidden');
+    this.paused  = false;
+    this.running = false;
+    this._inDangerZone = false;
+    if (this._rafId) cancelAnimationFrame(this._rafId);
+    this.audio.stopBg(); this.audio.stopPanic(); this.audio.stopRun();
+
+    this.scoreDisplay.style.display = 'none';
+    const bestDisplay = document.getElementById('best-score-display');
+    if (bestDisplay) bestDisplay.style.display = 'none';
+    const titleEl = document.getElementById('overlay-title');
+    if (titleEl) { titleEl.classList.remove('victory'); titleEl.textContent = '🐍 SNAKE RUSH'; }
+    this.startBtn.textContent = 'Play Again';
+    this.overlay.classList.remove('hidden');
   }
 
   _flashLifeLost() {
