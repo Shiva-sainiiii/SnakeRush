@@ -772,3 +772,91 @@ html, body {
     0 0 18px rgba(255,215,0,0.8),
     0 0 50px rgba(255,215,0,0.4);
 }
+
+/* ─── Pause Button (in HUD) ────────────────────────────────── */
+#pause-btn {
+  pointer-events: auto; /* HUD itself has pointer-events:none, so re-enable for this control */
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  border-radius: 50%;
+  border: 1px solid rgba(80,200,255,0.25);
+  background: rgba(10,20,28,0.85);
+  color: #7ee0ff;
+  font-size: 1rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+#pause-btn:active {
+  transform: scale(0.92);
+  background: rgba(80,200,255,0.22);
+}
+
+/* ─── Pause Overlay ─────────────────────────────────────────── */
+#pause-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30; /* above HUD (10) and canvas, below nothing else needed */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(3,7,12,0.82);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  padding: 20px;
+}
+#pause-overlay.hidden { display: none; }
+
+#pause-panel {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  padding: 28px 24px;
+  border-radius: 20px;
+  background: rgba(8,16,22,0.9);
+  border: 1px solid rgba(80,200,255,0.22);
+  box-shadow: 0 0 40px rgba(0,0,0,0.5);
+  text-align: center;
+}
+#pause-panel h2 {
+  font-size: 1.4rem;
+  color: #7ee0ff;
+  text-shadow: 0 0 12px rgba(126,224,255,0.5);
+  margin-bottom: 6px;
+  letter-spacing: 0.02em;
+}
+
+.pause-menu-btn {
+  padding: 13px 18px;
+  border-radius: 12px;
+  border: 1px solid rgba(80,200,255,0.22);
+  background: rgba(20,35,45,0.8);
+  color: #e0f0ff;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.pause-menu-btn:active { transform: scale(0.97); }
+
+.pause-menu-btn-primary {
+  background: rgba(126,224,255,0.16);
+  border-color: rgba(126,224,255,0.5);
+  color: #b8f0ff;
+}
+.pause-menu-btn-primary:active { background: rgba(126,224,255,0.3); }
+
+.pause-menu-btn-danger {
+  color: #ffb3b3;
+  border-color: rgba(255,100,100,0.25);
+}
+.pause-menu-btn-danger:active { background: rgba(255,80,80,0.15); }
