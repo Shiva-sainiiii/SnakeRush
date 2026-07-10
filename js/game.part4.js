@@ -260,7 +260,8 @@ Object.assign(Game.prototype, {
       if (!s.alive) continue;
       ctx.fillStyle = s.headColor;
       ctx.beginPath();
-      ctx.arc(MAP_X + s.head.x * SCALE_X, MAP_Y + s.head.y * SCALE_Y, 2.5, 0, Math.PI * 2);
+      const dotR = 2.5 * (s.radiusMul || 1);
+      ctx.arc(MAP_X + s.head.x * SCALE_X, MAP_Y + s.head.y * SCALE_Y, dotR, 0, Math.PI * 2);
       ctx.fill();
     }
 

@@ -446,8 +446,12 @@ class Game {
 
     for (let i = 0; i < aiCount; i++) {
       const [body, head] = randomAIPalette();
-      const x = 300 + Math.random() * (worldW - 600);
-      const y = 300 + Math.random() * (worldH - 600);
+      let x, y, tries = 0;
+      do {
+        x = 300 + Math.random() * (worldW - 600);
+        y = 300 + Math.random() * (worldH - 600);
+        tries++;
+      } while (Vector2.distSq({ x, y }, this.player.head) < 500 * 500 && tries < 8);
       this.snakes.push(new AISnake(x, y, body, head, this.foodGrid, this.snakes));
     }
 
@@ -695,7 +699,7 @@ class Game {
 
       for (const food of this._foodQueryBuf) {
         const dsq  = Vector2.distSq(snake.head, food.pos);
-        const rSum = getSegmentR(isPlayer) + food.radius;
+        const rSum = getSegmentR(isPlayer ? true : snake) + food.radius;
         if (dsq >= rSum * rSum) continue;
 
         if (isPlayer) {
@@ -788,8 +792,19 @@ class Game {
       for (let i = 1; i < this.snakes.length; i++) {
         if (!this.snakes[i].alive) {
           const [body, head] = randomAIPalette();
-          const x = 300 + Math.random() * (W - 600);
-          const y = 300 + Math.random() * (H - 600);
+          // Keep respawns a fair distance from the player — bigger species
+          // (Python/Anaconda) get a larger exclusion radius so they never
+          // pop into existence right on top of the player for a cheap hit.
+          let x, y, tries = 0;
+          do {
+            x = 300 + Math.random() * (W - 600);
+            y = 300 + Math.random() * (H - 600);
+            tries++;
+          } while (
+            this.player && this.player.alive &&
+            Vector2.distSq({ x, y }, this.player.head) < 500 * 500 &&
+            tries < 8
+          );
           this.snakes[i] = new AISnake(x, y, body, head, this.foodGrid, this.snakes);
         }
       }
@@ -898,11 +913,13 @@ class Game {
     if (triggeredByPlayer) {
       this.audio.playKill();
       this._hitStopTimer = 0.08;
-      this.killFeed.addKill(snake.name || 'Unknown');
+      const label = snake.speciesLabel ? `${snake.speciesLabel} ${snake.name || ''}`.trim() : (snake.name || 'Unknown');
+      this.killFeed.addKill(label);
       Profile.add('totalKills');
       this.achievements.onKill();
     } else {
-      this.killFeed.addEliminated(snake.name || 'Unknown');
+      const label = snake.speciesLabel ? `${snake.speciesLabel} ${snake.name || ''}`.trim() : (snake.name || 'Unknown');
+      this.killFeed.addEliminated(label);
     }
 
     // Drop food from dead snake
@@ -921,10 +938,6 @@ class Game {
 
   /* ── SNAKE VS SNAKE ─────────────────────────────────────── */
   _checkSnakeCollisions() {
-    const segR    = getSegmentR(true);
-    const KILL_DSQ = (segR * 1.8) * (segR * 1.8);
-    const HEAD_DSQ = (segR * 2.8) * (segR * 2.8);
-
     const killSet     = new Set();
     const shatterList = [];
     const playerKillSet = new Set();
@@ -969,6 +982,14 @@ class Game {
         const headDsq = Vector2.distSq(sa.head, sb.head);
         if (headDsq > 1000 * 1000) continue;
 
+        // Species-aware head collision radius: average of both snakes'
+        // actual rendered thickness, so an Anaconda's much bigger head
+        // reaches/gets-reached at a proportionally bigger distance.
+        const rA = getSegmentR(sa.isPlayer ? true : sa);
+        const rB = getSegmentR(sb.isPlayer ? true : sb);
+        const avgR = (rA + rB) / 2;
+        const HEAD_DSQ = (avgR * 2.8) * (avgR * 2.8);
+
         if (headDsq <= HEAD_DSQ) {
           if (a < b) {
             const sizeDiff = sa.segments.length - sb.segments.length;
@@ -983,9 +1004,10 @@ class Game {
           continue;
         }
 
-        // Head-vs-body (sa → sb)
+        // Head-vs-body (sa → sb): hit radius uses sb's body thickness
+        const killDsqB = (getSegmentR(sb.isPlayer ? true : sb) * 1.8) ** 2;
         for (let s = 1; s < sb.segments.length; s++) {
-          if (Vector2.distSq(sa.head, sb.segments[s]) >= KILL_DSQ) continue;
+          if (Vector2.distSq(sa.head, sb.segments[s]) >= killDsqB) continue;
           // Ghost: skip body collision
           if (sa === this.player && this.player.isGhost) break;
           if (sa === this.player && playerInAttack && sb !== this.player) {
@@ -999,9 +1021,10 @@ class Game {
           break;
         }
 
-        // Head-vs-body (sb → sa)
+        // Head-vs-body (sb → sa): hit radius uses sa's body thickness
+        const killDsqA = (getSegmentR(sa.isPlayer ? true : sa) * 1.8) ** 2;
         for (let s = 1; s < sa.segments.length; s++) {
-          if (Vector2.distSq(sb.head, sa.segments[s]) >= KILL_DSQ) continue;
+          if (Vector2.distSq(sb.head, sa.segments[s]) >= killDsqA) continue;
           if (sb === this.player && this.player.isGhost) break;
           if (sb === this.player && playerInAttack && sa !== this.player) {
             shatterList.push({ snake: sa, fromIndex: s });

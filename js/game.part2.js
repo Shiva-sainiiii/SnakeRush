@@ -298,13 +298,24 @@ class ParticlePool {
 /* ─────────────────────────────────────────────────────────────
    5. SNAKE (base class)
 ───────────────────────────────────────────────────────────── */
-function getSegmentR(isPlayer = false) {
-  if (!isPlayer) return SEGMENT_R_BASE;
-  switch (Settings.design) {
-    case 'fatty':  return Math.round(SEGMENT_R_BASE * 1.45);
-    case 'thin':   return Math.round(SEGMENT_R_BASE * 0.60);
-    default:       return SEGMENT_R_BASE;
+function getSegmentR(snakeOrIsPlayer = false) {
+  // Backward-compatible: accepts either `true`/`false` (old call sites that
+  // only cared about player-vs-AI) or an actual snake instance (new call
+  // sites that want per-species thickness).
+  if (snakeOrIsPlayer === true) {
+    switch (Settings.design) {
+      case 'fatty':  return Math.round(SEGMENT_R_BASE * 1.45);
+      case 'thin':   return Math.round(SEGMENT_R_BASE * 0.60);
+      default:       return SEGMENT_R_BASE;
+    }
   }
+  if (snakeOrIsPlayer && snakeOrIsPlayer.isPlayer) {
+    return getSegmentR(true);
+  }
+  if (snakeOrIsPlayer && snakeOrIsPlayer.radiusMul) {
+    return Math.round(SEGMENT_R_BASE * snakeOrIsPlayer.radiusMul);
+  }
+  return SEGMENT_R_BASE;
 }
 
 let _designerPaletteIdx = 0;
@@ -443,7 +454,7 @@ class Snake {
     // Draw trail first
     this._drawTrail(ctx, camX, camY);
 
-    const segR       = getSegmentR(this.isPlayer);
+    const segR       = getSegmentR(this.isPlayer ? true : this);
     const segs       = this.segments;
     const len        = segs.length;
     const inAttack   = this.attackTimer !== undefined && this.attackTimer > 0;
@@ -671,17 +682,77 @@ const HYSTERESIS = {
   SEEK_FOOD: { enter: 0.0,  exit: 0.10 },
 };
 
+/* ─────────────────────────────────────────────────────────────
+   SPECIES — visual/size/speed archetypes for AI snakes.
+   Each species is a preset "body plan": how long it spawns, how thick
+   its segments render, and a speed multiplier. Personality (below)
+   still controls BEHAVIOR (aggressive/coward/hunter/farmer) — species
+   and personality are independent axes that combine, so you can get
+   e.g. an "aggressive Anaconda" or a "coward Hatchling".
+   weight = relative spawn chance (higher = more common).
+───────────────────────────────────────────────────────────── */
+const SNAKE_SPECIES = [
+  {
+    id: 'hatchling', label: 'Hatchling',
+    minLen: 5,  maxLen: 7,   radiusMul: 0.55, speedMul: 1.00,
+    weight: 20, scoreMul: 0.6,
+  },
+  {
+    id: 'garter', label: 'Garter Snake',
+    minLen: 8,  maxLen: 13,  radiusMul: 0.72, speedMul: 1.28,
+    weight: 26, scoreMul: 0.8,
+  },
+  {
+    id: 'viper', label: 'Viper',
+    minLen: 14, maxLen: 20,  radiusMul: 1.00, speedMul: 1.15,
+    weight: 24, scoreMul: 1.0,
+  },
+  {
+    id: 'python', label: 'Python',
+    minLen: 26, maxLen: 36,  radiusMul: 1.35, speedMul: 0.95,
+    weight: 16, scoreMul: 1.4,
+  },
+  {
+    id: 'anaconda', label: 'Anaconda',
+    minLen: 42, maxLen: 58,  radiusMul: 1.75, speedMul: 0.82,
+    weight: 8,  scoreMul: 2.0,
+  },
+];
+const SNAKE_SPECIES_TOTAL_WEIGHT = SNAKE_SPECIES.reduce((s, sp) => s + sp.weight, 0);
+
+function pickSpecies() {
+  let r = Math.random() * SNAKE_SPECIES_TOTAL_WEIGHT;
+  for (const sp of SNAKE_SPECIES) {
+    r -= sp.weight;
+    if (r <= 0) return sp;
+  }
+  return SNAKE_SPECIES[SNAKE_SPECIES.length - 1];
+}
+
 const AI_PERSONALITIES = ['aggressive', 'coward', 'hunter', 'farmer'];
 
 class AISnake extends Snake {
   constructor(x, y, bodyColor, headColor, foodGrid, snakes) {
-    super(x, y, bodyColor, headColor, 8);
+    // Species decides body plan (size + thickness + base speed multiplier);
+    // spawn length is randomized within the species' adult range so AI
+    // snakes appear at full size instead of always hatching as babies.
+    const species  = pickSpecies();
+    const spawnLen = species.minLen + Math.floor(Math.random() * (species.maxLen - species.minLen + 1));
+
+    super(x, y, bodyColor, headColor, spawnLen);
+    this.species    = species.id;
+    this.speciesLabel = species.label;
+    this.speciesRef = species; // cached reference, avoids per-frame array lookup
+    this.radiusMul  = species.radiusMul;
+    this.scoreMul   = species.scoreMul;
+
     this.foodGrid = foodGrid;
     this.snakes   = snakes;
     this.state    = AI_STATE.WANDER;
     this.name     = generateName();
 
-    // Assign personality
+    // Assign personality (independent of species — a Garter Snake can be
+    // aggressive, an Anaconda can be a coward, etc.)
     this.personality = AI_PERSONALITIES[Math.floor(Math.random() * AI_PERSONALITIES.length)];
 
     this._wanderAngle  = Math.random() * Math.PI * 2;
@@ -700,34 +771,41 @@ class AISnake extends Snake {
     this.pursueThreshold = 8;   // sizeDiff needed to pursue
     this.fleeThreshold   = 8;   // sizeDiff needed to flee
 
-    this._applyPersonality();
+    // Base speed starts from the species multiplier; _applyPersonality()
+    // below layers its own multiplier on top of BASE_SPEED, so we blend
+    // both into a single combined multiplier applied last.
+    this.speed = BASE_SPEED * species.speedMul;
+    this._applyPersonality(species.speedMul);
 
     this._hyst = { PURSUE: 0, FLEE: 0, AVOID: 0, SEEK_FOOD: 0 };
     this._fleeTarget = null; this._pursueTarget = null; this._avoidNormal = null;
     this._nearby = []; this._nearbySnakes = [];
   }
 
-  _applyPersonality() {
+  _applyPersonality(speciesSpeedMul = 1) {
     switch (this.personality) {
       case 'aggressive':
         this.pursueThreshold = 4;
         this.fleeThreshold   = 25;
-        this.speed = BASE_SPEED * 1.08;
+        this.speed = BASE_SPEED * speciesSpeedMul * 1.08;
         break;
       case 'coward':
         this.pursueThreshold = 30;
         this.fleeThreshold   = 4;
-        this.speed = BASE_SPEED * 0.95;
+        this.speed = BASE_SPEED * speciesSpeedMul * 0.95;
         break;
       case 'hunter':
         this.SNAKE_SENSE_R = 380;
-        this.speed = BASE_SPEED * 1.05;
+        this.speed = BASE_SPEED * speciesSpeedMul * 1.05;
         break;
       case 'farmer':
         this.FOOD_RADIUS   = 320;
         this.SNAKE_SENSE_R = 80;
         this.pursueThreshold = 999;
+        this.speed = BASE_SPEED * speciesSpeedMul;
         break;
+      default:
+        this.speed = BASE_SPEED * speciesSpeedMul;
     }
   }
 
@@ -741,7 +819,12 @@ class AISnake extends Snake {
     const clamped = force.clamp(this.MAX_FORCE);
     const lerpT   = Math.min(1, this.STEER_LERP * dt);
     this.dir = this.dir.lerp(this.dir.add(clamped), lerpT).normalize();
-    this.speed = this._calcSpeed(BASE_SPEED * (this.personality === 'aggressive' ? 1.08 : this.personality === 'coward' ? 0.95 : this.personality === 'hunter' ? 1.05 : 1));
+    const personalityMul = this.personality === 'aggressive' ? 1.08
+                          : this.personality === 'coward'    ? 0.95
+                          : this.personality === 'hunter'    ? 1.05
+                          : 1;
+    const speciesMul = this.speciesRef ? this.speciesRef.speedMul : 1;
+    this.speed = this._calcSpeed(BASE_SPEED * personalityMul * speciesMul);
     this._applyDirection(dt);
     this._moveSegments();
     this._grow();

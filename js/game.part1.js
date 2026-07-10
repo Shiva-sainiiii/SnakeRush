@@ -516,10 +516,10 @@ class Mine {
 /* ─────────────────────────────────────────────────────────────
    CONSTANTS
 ───────────────────────────────────────────────────────────── */
-const WORLD_W       = 3000;
-const WORLD_H       = 3000;
-const FOOD_COUNT    = 320;
-const AI_COUNT      = 10;
+const WORLD_W       = 5500;
+const WORLD_H       = 5500;
+const FOOD_COUNT    = 620;
+const AI_COUNT      = 14;
 const SEGMENT_GAP   = 8;
 const SEGMENT_R_BASE = 9;
 const BASE_SPEED    = 130;
