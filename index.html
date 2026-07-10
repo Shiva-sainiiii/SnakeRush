@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Snake Rush</title>
-  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
@@ -141,6 +141,17 @@
     <span id="hud-snakes-remaining" class="hidden"></span>
     <span id="hud-powerups"></span>
     <span id="hud-boost" class="hud-boost-off">⚡ Hold to boost</span>
+    <button id="pause-btn" aria-label="Pause game" title="Pause">⏸</button>
+  </div>
+
+  <!-- Pause overlay: shown when game is paused (manual or auto on tab-hide) -->
+  <div id="pause-overlay" class="hidden">
+    <div id="pause-panel">
+      <h2>⏸ Paused</h2>
+      <button id="resume-btn" class="pause-menu-btn pause-menu-btn-primary">▶ Resume</button>
+      <button id="restart-btn" class="pause-menu-btn">🔄 Restart</button>
+      <button id="exit-btn" class="pause-menu-btn pause-menu-btn-danger">✕ Exit to Menu</button>
+    </div>
   </div>
 
   <canvas id="game-canvas" style="touch-action:none;"></canvas>
@@ -149,11 +160,11 @@
        part1 = utils/managers, part2 = entities (Snake/Food/etc),
        part3 = Game class core, part4 = Game render methods (extends part3's
        class via Object.assign(Game.prototype, ...)), part5 = boot. -->
-  <script src="js/game.part1.js"></script>
-  <script src="js/game.part2.js"></script>
-  <script src="js/game.part3.js"></script>
-  <script src="js/game.part4.js"></script>
-  <script src="js/game.part5.js"></script>
+  <script src="game.part1.js"></script>
+  <script src="game.part2.js"></script>
+  <script src="game.part3.js"></script>
+  <script src="game.part4.js"></script>
+  <script src="game.part5.js"></script>
 
   <!-- HUD wiring for boost + powerup badges -->
   <script>
