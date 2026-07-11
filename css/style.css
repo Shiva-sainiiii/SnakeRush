@@ -43,67 +43,145 @@ html, body {
   left: max(8px, env(safe-area-inset-left));
   right: max(8px, env(safe-area-inset-right));
   /* Don't stretch full-width on tablets/desktop; cap it */
-  max-width: min(96vw, 600px);
+  max-width: min(96vw, 700px);
   /* Auto-centre between the safe-area margins */
   margin: 0 auto;
   /* Layout */
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
-  flex-wrap: wrap;           /* Items wrap on narrow viewports */
+  flex-wrap: wrap;
   justify-content: center;
   z-index: 10;
   pointer-events: none;
-  /* Glassmorphism pill */
-  background: rgba(5,10,15,0.72);
-  border: 1px solid rgba(80,200,255,0.18);
-  border-radius: 999px;
-  padding: 6px 16px;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  /* Remove rigid background - elements have their own */
+  background: transparent;
+  border: none;
+  padding: 0;
   /* Typography */
   font-size: clamp(0.62rem, 2.2vw, 0.82rem);
   letter-spacing: 0.045em;
   color: rgba(180,230,255,0.9);
-  /* Guard against overflowing past minimap on small screens */
   box-sizing: border-box;
-  /* FIX: Add max-height and prevent overflow */
-  max-height: 60px;
+  max-height: 80px;
   overflow: hidden;
 }
 
-/* Tighter gap + smaller pill on very narrow portrait phones */
+/* Individual HUD elements get their own badges */
+#hud > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(126,255,178,0.25);
+  box-shadow: 0 0 20px rgba(0,0,0,0.4);
+  transition: all 0.3s ease;
+}
+
+/* Score badge - warm blue gradient */
+#hud-name-score {
+  background: linear-gradient(135deg, rgba(50,150,255,0.15), rgba(100,200,255,0.08));
+  border-color: rgba(100,200,255,0.4);
+  color: #64c8ff;
+  text-shadow: 0 0 8px rgba(100,200,255,0.6);
+}
+
+/* Best score badge - golden glow */
+#hud-best-score {
+  background: linear-gradient(135deg, rgba(255,215,0,0.12), rgba(255,215,0,0.06));
+  border-color: rgba(255,215,0,0.5);
+  color: #ffd700;
+  text-shadow: 0 0 8px rgba(255,215,0,0.6);
+}
+
+/* Length badge - mint green */
+#hud-length {
+  background: linear-gradient(135deg, rgba(126,255,178,0.12), rgba(126,255,178,0.06));
+  border-color: rgba(126,255,178,0.4);
+  color: #7effb2;
+  text-shadow: 0 0 8px rgba(126,255,178,0.5);
+}
+
+/* Lives container - compact and glowing */
+#hud-lives {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(255,80,80,0.1), rgba(255,100,100,0.05));
+  border: 1px solid rgba(255,100,100,0.3);
+  box-shadow: 0 0 15px rgba(255,80,80,0.3);
+}
+
+/* Tighter gap + smaller on very narrow portrait phones */
 @media (max-width: 479px) {
   #hud {
-    gap: 6px;
-    padding: 5px 12px;
-    border-radius: 14px;       /* Pill→rounded-rect on tiny screens */
+    gap: 5px;
+    padding: 0;
     font-size: 0.6rem;
     letter-spacing: 0.03em;
-    /* Stay in a column-friendly 2-row grid rather than one long row */
     flex-wrap: wrap;
   }
-  /* Shrink separator dots on mobile so they don't eat horizontal space */
-  #hud span + span::before {
-    margin-right: 6px;
+  
+  #hud > span {
+    padding: 5px 10px;
+    font-size: 0.65rem;
   }
-  /* Boost label: just show the icon on tiny screens */
+  
+  #hud-lives {
+    padding: 5px 8px;
+  }
+  
+  /* Shrink separator dots on mobile */
+  #hud span + span::before {
+    margin-right: 2px;
+    font-size: 0.5rem;
+  }
+  
+  /* Boost label compact */
   .hud-boost-off { font-size: 0.6rem; }
   .hud-boost-on  { font-size: 0.6rem; }
+  
   /* Hearts slightly smaller */
   .life-heart { font-size: 0.85rem; }
+  
   /* Power-up badges compact */
-  .powerup-badge { font-size: 0.6rem; padding: 1px 6px; }
+  .powerup-badge { font-size: 0.6rem; padding: 2px 8px; }
 }
 
 #hud span {
   font-variant-numeric: tabular-nums;
 }
 
+/* Separator dots between HUD items */
+#hud span + span::before {
+  content: '·';
+  margin-right: 6px;
+  opacity: 0.3;
+  color: rgba(126,255,178,0.4);
+}
+
+/* Remove separator before lives and pause button */
+#hud #hud-lives::before {
+  content: none !important;
+  margin: 0 !important;
+}
+
+#hud #pause-btn::before {
+  content: none !important;
+  margin: 0 !important;
+}
+
 /* Boost indicator states */
 .hud-boost-off {
   color: rgba(160,210,255,0.45);
   font-size: 0.75rem;
+  text-shadow: none;
 }
 
 .hud-boost-on {
@@ -116,13 +194,6 @@ html, body {
 @keyframes pulse-boost {
   from { opacity: 0.8; }
   to   { opacity: 1;   }
-}
-
-/* Separator dots between HUD items */
-#hud span + span::before {
-  content: '·';
-  margin-right: 10px;
-  opacity: 0.3;
 }
 
 /* Timer — matches the HUD's blue-teal palette instead of clashing green */
@@ -613,21 +684,23 @@ html, body {
 
 /* ─── Lives / HP Meter ──────────────────────────────────────── */
 #hud-lives {
-  display: flex;
+  display: inline-flex;
   gap: 5px;
   align-items: center;
+  pointer-events: none;
 }
 
 .life-heart {
   font-size: 1.05rem;
   line-height: 1;
-  transition: transform 0.15s ease, opacity 0.3s ease;
-  filter: drop-shadow(0 0 4px rgba(255,80,80,0.8));
+  transition: transform 0.15s ease, opacity 0.3s ease, filter 0.3s ease;
+  filter: drop-shadow(0 0 6px rgba(255,100,100,0.9));
+  text-shadow: 0 0 8px rgba(255,80,80,0.8);
 }
 
 .life-heart.lost {
   opacity: 0.22;
-  filter: none;
+  filter: drop-shadow(0 0 2px rgba(255,80,80,0.3));
   transform: scale(0.8);
 }
 
@@ -643,34 +716,40 @@ html, body {
 
 /* Power-up active badges on HUD */
 #hud-powerups {
-  display: flex;
+  display: inline-flex;
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+  pointer-events: none;
 }
 
 .powerup-badge {
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.04em;
-  padding: 3px 11px;
+  padding: 5px 12px;
   border-radius: 999px;
   white-space: nowrap;
-  transition: opacity 0.3s ease;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  transition: opacity 0.3s ease, transform 0.2s ease;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid;
+}
+
+.powerup-badge:hover {
+  transform: scale(1.05);
 }
 
 .powerup-badge.magnet {
   background: rgba(80,180,255,0.18);
-  border: 1px solid rgba(80,180,255,0.5);
+  border-color: rgba(80,180,255,0.5);
   color: #52aaff;
   text-shadow: 0 0 6px rgba(82,170,255,0.8);
 }
 
 .powerup-badge.attack {
   background: rgba(255,60,60,0.18);
-  border: 1px solid rgba(255,80,80,0.55);
+  border-color: rgba(255,80,80,0.55);
   color: #ff5e5e;
   text-shadow: 0 0 6px rgba(255,80,80,0.8);
   animation: pulse-attack 0.5s ease-in-out infinite alternate;
@@ -678,7 +757,7 @@ html, body {
 
 .powerup-badge.shield {
   background: rgba(160,216,255,0.15);
-  border: 1px solid rgba(160,216,255,0.55);
+  border-color: rgba(160,216,255,0.55);
   color: #a0d8ff;
   text-shadow: 0 0 6px rgba(160,216,255,0.8);
   animation: pulse-shield 0.8s ease-in-out infinite alternate;
@@ -686,14 +765,14 @@ html, body {
 
 .powerup-badge.ghost {
   background: rgba(200,160,255,0.15);
-  border: 1px solid rgba(200,160,255,0.5);
+  border-color: rgba(200,160,255,0.5);
   color: #c8a0ff;
   text-shadow: 0 0 6px rgba(200,160,255,0.8);
 }
 
 .powerup-badge.mine {
   background: rgba(255,159,64,0.15);
-  border: 1px solid rgba(255,159,64,0.5);
+  border-color: rgba(255,159,64,0.5);
   color: #ff9f40;
   text-shadow: 0 0 6px rgba(255,159,64,0.8);
   animation: pulse-mine 0.6s ease-in-out infinite alternate;
@@ -701,7 +780,7 @@ html, body {
 
 .powerup-badge.speedboost {
   background: rgba(255,255,128,0.15);
-  border: 1px solid rgba(255,255,128,0.5);
+  border-color: rgba(255,255,128,0.5);
   color: #ffff80;
   text-shadow: 0 0 6px rgba(255,255,128,0.8);
   animation: pulse-speed 0.3s ease-in-out infinite alternate;
@@ -760,14 +839,6 @@ html, body {
   font-variant-numeric: tabular-nums;
 }
 
-/* ── Best Score — HUD ───────────────────────────────────────── */
-#hud-best-score {
-  font-size: 0.78rem;
-  color: rgba(255,215,0,0.75);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.04em;
-}
-
 /* Victory screen */
 #overlay-title.victory {
   color: #ffd700;
@@ -779,25 +850,36 @@ html, body {
 /* ─── Pause Button (in HUD) ────────────────────────────────── */
 #pause-btn {
   pointer-events: auto; /* HUD itself has pointer-events:none, so re-enable for this control */
-  width: 34px;
-  height: 34px;
-  min-width: 34px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
   border-radius: 50%;
-  border: 1px solid rgba(80,200,255,0.25);
-  background: rgba(10,20,28,0.85);
+  border: 1.5px solid rgba(126,224,255,0.4);
+  background: linear-gradient(135deg, rgba(30,100,150,0.3), rgba(10,50,80,0.3));
   color: #7ee0ff;
-  font-size: 1rem;
+  font-size: 1.1rem;
   line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.15s ease, transform 0.1s ease;
+  transition: all 0.2s ease;
   -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 0 15px rgba(126,224,255,0.25);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
+
+#pause-btn:hover {
+  background: linear-gradient(135deg, rgba(50,150,200,0.4), rgba(20,100,150,0.4));
+  border-color: rgba(126,224,255,0.6);
+  box-shadow: 0 0 20px rgba(126,224,255,0.4);
+  transform: scale(1.1);
+}
+
 #pause-btn:active {
-  transform: scale(0.92);
-  background: rgba(80,200,255,0.22);
+  transform: scale(0.95);
+  background: linear-gradient(135deg, rgba(30,100,150,0.5), rgba(10,50,80,0.5));
 }
 
 /* ─── Pause Overlay ─────────────────────────────────────────── */
