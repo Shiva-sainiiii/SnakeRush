@@ -67,6 +67,9 @@ html, body {
   color: rgba(180,230,255,0.9);
   /* Guard against overflowing past minimap on small screens */
   box-sizing: border-box;
+  /* FIX: Add max-height and prevent overflow */
+  max-height: 60px;
+  overflow: hidden;
 }
 
 /* Tighter gap + smaller pill on very narrow portrait phones */
