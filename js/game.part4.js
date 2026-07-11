@@ -133,7 +133,7 @@ Object.assign(Game.prototype, {
     ctx.restore();
   },
 
-  /* ── ANIMATED ELECTRIC FENCE BORDER ─────────────────────── */
+  /* ── ANIMATED ELECTRIC FENCE BORDER ─────────��───────────── */
   _drawWorldBorder() {
     const { ctx } = this;
     const W = this._worldW, H = this._worldH;
@@ -235,8 +235,9 @@ Object.assign(Game.prototype, {
     const MAP_PAD    = isNarrow ? 8 : 14;
     const MAP_X      = logW - MAP_W - MAP_PAD;
     // Top: push below safe-area inset + HUD height headroom
-    // HUD sits at ~max(10px, safeTop+6px) + ~30px height = ~50px worst case
-    const HUD_CLEARANCE = isNarrow ? 52 : 14;
+    // HUD can wrap to multiple rows with powerups, so use a larger clearance
+    // Safer estimate: safe-area + 80px for HUD + gaps
+    const HUD_CLEARANCE = isNarrow ? 95 : 70;
     const MAP_Y      = HUD_CLEARANCE + MAP_PAD;
 
     const W = this._worldW, H = this._worldH;
@@ -282,4 +283,3 @@ Object.assign(Game.prototype, {
     ctx.restore();
   }
 });
-
