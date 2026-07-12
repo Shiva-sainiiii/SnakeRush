@@ -167,6 +167,11 @@
   <script src="js/game.part5.js"></script>
 
   <!-- HUD wiring for boost + powerup badges -->
+  <!-- Perf: this used to run innerHTML writes + array allocations every
+       single rAF tick (60/sec), competing with the canvas game loop for
+       main-thread time even though a text HUD doesn't need 60fps updates.
+       Now it throttles to ~10 updates/sec and skips DOM writes entirely
+       when nothing actually changed since the last tick. -->
   <script>
     document.addEventListener('DOMContentLoaded', () => {
       const boostEl    = document.getElementById('hud-boost');
@@ -174,54 +179,67 @@
       const timerEl    = document.getElementById('hud-timer');
       const snakesEl   = document.getElementById('hud-snakes-remaining');
 
-      function tick() {
+      const HUD_INTERVAL = 100; // ms between HUD DOM updates (~10/sec)
+      let _lastTick = 0;
+      let _prevBadges = null;
+      let _prevBoost  = null;
+      let _prevTimerText = null;
+      let _prevSnakesText = null;
+
+      function tick(now) {
+        requestAnimationFrame(tick);
+        if (now - _lastTick < HUD_INTERVAL) return;
+        _lastTick = now;
+
         const g = window._game;
         if (g && g.player) {
           const p = g.player;
 
-          // Boost indicator
+          // Boost indicator — skip write if unchanged
           const b = p.boosting;
-          boostEl.className   = b ? 'hud-boost-on' : 'hud-boost-off';
-          boostEl.textContent = b ? '⚡ BOOSTING' : '⚡ Hold to boost';
+          if (b !== _prevBoost) {
+            _prevBoost = b;
+            boostEl.className   = b ? 'hud-boost-on' : 'hud-boost-off';
+            boostEl.textContent = b ? '⚡ BOOSTING' : '⚡ Hold to boost';
+          }
 
           // Active power-up badges
           let badges = '';
-          if (p.magnetTimer > 0) {
-            const secs = Math.ceil(p.magnetTimer);
-            badges += `<span class="powerup-badge magnet">🧲 MAGNET ${secs}s</span>`;
+          if (p.magnetTimer > 0)     badges += `<span class="powerup-badge magnet">🧲 MAGNET ${Math.ceil(p.magnetTimer)}s</span>`;
+          if (p.attackTimer > 0)     badges += `<span class="powerup-badge attack">⚔️ ATTACK ${Math.ceil(p.attackTimer)}s</span>`;
+          if (p.shieldTimer > 0)     badges += `<span class="powerup-badge shield">🛡️ SHIELD ${Math.ceil(p.shieldTimer)}s</span>`;
+          if (p.ghostTimer > 0)      badges += `<span class="powerup-badge ghost">👻 GHOST ${Math.ceil(p.ghostTimer)}s</span>`;
+          if (p.mineTimer > 0)       badges += `<span class="powerup-badge mine">💣 MINE ${Math.ceil(p.mineTimer)}s</span>`;
+          if (p.speedBoostTimer > 0) badges += `<span class="powerup-badge speedboost">⚡ SPEED ${Math.ceil(p.speedBoostTimer)}s</span>`;
+          if (badges !== _prevBadges) {
+            _prevBadges = badges;
+            powerupsEl.innerHTML = badges;
           }
-          if (p.attackTimer > 0) {
-            const secs = Math.ceil(p.attackTimer);
-            badges += `<span class="powerup-badge attack">⚔️ ATTACK ${secs}s</span>`;
-          }
-          if (p.shieldTimer > 0) {
-            const secs = Math.ceil(p.shieldTimer);
-            badges += `<span class="powerup-badge shield">🛡️ SHIELD ${secs}s</span>`;
-          }
-          if (p.ghostTimer > 0) {
-            const secs = Math.ceil(p.ghostTimer);
-            badges += `<span class="powerup-badge ghost">👻 GHOST ${secs}s</span>`;
-          }
-          if (p.mineTimer > 0) {
-            const secs = Math.ceil(p.mineTimer);
-            badges += `<span class="powerup-badge mine">💣 MINE ${secs}s</span>`;
-          }
-          if (p.speedBoostTimer > 0) {
-            const secs = Math.ceil(p.speedBoostTimer);
-            badges += `<span class="powerup-badge speedboost">⚡ SPEED ${secs}s</span>`;
-          }
-          powerupsEl.innerHTML = badges;
 
-          // Time Trial timer
+          // Time Trial timer / Arena counter
           if (g._mode === 'timetrial' && g._ttTimer !== undefined) {
             const secs = Math.ceil(g._ttTimer);
-            timerEl.textContent = `⏱ ${secs}s`;
-            timerEl.className = secs <= 30 ? 'hud-timer-danger' : '';
+            const txt = `⏱ ${secs}s`;
+            if (txt !== _prevTimerText) {
+              _prevTimerText = txt;
+              timerEl.textContent = txt;
+              timerEl.className = secs <= 30 ? 'hud-timer-danger' : '';
+            }
             timerEl.classList.remove('hidden');
             snakesEl.classList.add('hidden');
           } else if (g._mode === 'arena') {
-            const alive = g.snakes ? g.snakes.filter(s => s !== g.player && s.alive).length : 0;
-            snakesEl.textContent = `SNAKES: ${alive}`;
+            let alive = 0;
+            if (g.snakes) {
+              for (let i = 0; i < g.snakes.length; i++) {
+                const s = g.snakes[i];
+                if (s !== g.player && s.alive) alive++;
+              }
+            }
+            const txt = `SNAKES: ${alive}`;
+            if (txt !== _prevSnakesText) {
+              _prevSnakesText = txt;
+              snakesEl.textContent = txt;
+            }
             snakesEl.classList.remove('hidden');
             timerEl.classList.add('hidden');
           } else {
@@ -229,9 +247,8 @@
             snakesEl.classList.add('hidden');
           }
         }
-        requestAnimationFrame(tick);
       }
-      tick();
+      requestAnimationFrame(tick);
     });
   </script>
 </body>
