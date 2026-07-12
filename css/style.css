@@ -75,11 +75,14 @@ html, body {
   padding: 7px 14px;
   border-radius: 999px;
   font-variant-numeric: tabular-nums;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  /* Perf: backdrop-filter here forced continuous GPU recompositing every
+     frame since the canvas underneath repaints at 60fps — a real mobile
+     lag contributor. A solid semi-opaque background gives nearly the same
+     "frosted pill" look for a fraction of the GPU cost. */
+  background: rgba(8,16,26,0.82);
   border: 1px solid rgba(126,255,178,0.25);
   box-shadow: 0 0 20px rgba(0,0,0,0.4);
-  transition: all 0.3s ease;
+  transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
 /* Score badge - warm blue gradient */
@@ -731,8 +734,9 @@ html, body {
   border-radius: 999px;
   white-space: nowrap;
   transition: opacity 0.3s ease, transform 0.2s ease;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  /* Perf: was backdrop-filter blur, shown live over the redrawing canvas
+     during gameplay — same GPU cost issue as the HUD pills above. */
+  background: rgba(8,16,26,0.82);
   border: 1px solid;
 }
 
