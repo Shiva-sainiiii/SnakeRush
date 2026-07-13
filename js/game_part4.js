@@ -37,8 +37,6 @@ Object.assign(Game.prototype, {
 
     this.particles.draw(ctx, this.camX, this.camY);
 
-    this._drawNightOverlay(logW, logH);
-
     this._drawMinimap(logW, logH);
     if (this.player && this.player.alive) this._drawWallWarning(logW, logH);
 
@@ -87,35 +85,6 @@ Object.assign(Game.prototype, {
     ctx.shadowColor = '#00ccff'; ctx.shadowBlur = 10;
     ctx.beginPath(); ctx.arc(hx, hy, MAGNET_RADIUS, 0, Math.PI * 2); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.restore();
-  },
-
-  // Perf note: this is a single flat fillRect plus one radial-gradient
-  // fillRect per frame — cheap regardless of darkness level, and the
-  // gradient is skipped entirely when darkness is ~0 (full daylight).
-  _drawNightOverlay(logW, logH) {
-    const darkness = this._getDarkness ? this._getDarkness() : 0;
-    if (darkness <= 0.01) return;
-    const { ctx } = this;
-
-    ctx.save();
-    // Flat tint over everything
-    ctx.fillStyle = `rgba(5,8,20,${darkness.toFixed(3)})`;
-    ctx.fillRect(0, 0, logW, logH);
-
-    // Vignette centered on the player (camera always keeps them roughly
-    // centered) — darkens the edges more than the middle, giving a
-    // "narrower visible range at night" feel without touching any AI or
-    // collision logic.
-    const hx = this.player && this.player.alive ? this.player.head.x - this.camX : logW / 2;
-    const hy = this.player && this.player.alive ? this.player.head.y - this.camY : logH / 2;
-    const innerR = Math.min(logW, logH) * (0.32 - darkness * 0.12);
-    const outerR = Math.max(logW, logH) * 0.72;
-    const grad = ctx.createRadialGradient(hx, hy, Math.max(0, innerR), hx, hy, outerR);
-    grad.addColorStop(0, 'rgba(0,0,0,0)');
-    grad.addColorStop(1, `rgba(0,0,10,${(darkness * 0.85).toFixed(3)})`);
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, logW, logH);
     ctx.restore();
   },
 

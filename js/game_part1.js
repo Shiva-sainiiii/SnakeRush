@@ -578,11 +578,6 @@ const DANGER_ZONE_DIST   = 250;
 // Boss Snake: seconds between Titan Serpent spawns (only one alive at a time)
 const BOSS_INTERVAL = 90;
 
-// Day/Night cycle: full day->night->day period, and how dark the screen
-// gets at peak night (0 = no darkening, 1 = fully black).
-const DAY_NIGHT_PERIOD    = 180;
-const NIGHT_MAX_DARKNESS  = 0.55;
-
 /* Designer palette */
 const DESIGNER_PALETTES = [
   ['#a855f7', '#d8b4fe'],
