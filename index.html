@@ -19,7 +19,6 @@
         <span class="mode-label">Game Mode</span>
         <div class="mode-btns" role="group" aria-label="Game mode">
           <button class="mode-btn active" data-mode="classic">Classic</button>
-          <button class="mode-btn" data-mode="arena">Arena</button>
           <button class="mode-btn" data-mode="timetrial">Time Trial</button>
         </div>
         <div id="mode-desc" class="mode-desc">Eat food, grow big, outlast 10 AI snakes. 3 lives.</div>
@@ -138,7 +137,6 @@
       <span class="life-heart" id="heart-3">❤️</span>
     </span>
     <span id="hud-timer" class="hidden"></span>
-    <span id="hud-snakes-remaining" class="hidden"></span>
     <span id="hud-powerups"></span>
     <span id="hud-boost" class="hud-boost-off">⚡ Hold to boost</span>
     <button id="pause-btn" aria-label="Pause game" title="Pause">⏸</button>
@@ -160,11 +158,11 @@
        part1 = utils/managers, part2 = entities (Snake/Food/etc),
        part3 = Game class core, part4 = Game render methods (extends part3's
        class via Object.assign(Game.prototype, ...)), part5 = boot. -->
-  <script src="js/game_part1.js"></script>
-  <script src="js/game_part2.js"></script>
-  <script src="js/game_part3.js"></script>
-  <script src="js/game_part4.js"></script>
-  <script src="js/game_part5.js"></script>
+  <script src="js/game.part1.js"></script>
+  <script src="js/game.part2.js"></script>
+  <script src="js/game.part3.js"></script>
+  <script src="js/game.part4.js"></script>
+  <script src="js/game.part5.js"></script>
 
   <!-- HUD wiring for boost + powerup badges -->
   <!-- Perf: this used to run innerHTML writes + array allocations every
@@ -177,14 +175,12 @@
       const boostEl    = document.getElementById('hud-boost');
       const powerupsEl = document.getElementById('hud-powerups');
       const timerEl    = document.getElementById('hud-timer');
-      const snakesEl   = document.getElementById('hud-snakes-remaining');
 
       const HUD_INTERVAL = 100; // ms between HUD DOM updates (~10/sec)
       let _lastTick = 0;
       let _prevBadges = null;
       let _prevBoost  = null;
       let _prevTimerText = null;
-      let _prevSnakesText = null;
 
       function tick(now) {
         requestAnimationFrame(tick);
@@ -216,7 +212,7 @@
             powerupsEl.innerHTML = badges;
           }
 
-          // Time Trial timer / Arena counter
+          // Time Trial timer
           if (g._mode === 'timetrial' && g._ttTimer !== undefined) {
             const secs = Math.ceil(g._ttTimer);
             const txt = `⏱ ${secs}s`;
@@ -226,25 +222,8 @@
               timerEl.className = secs <= 30 ? 'hud-timer-danger' : '';
             }
             timerEl.classList.remove('hidden');
-            snakesEl.classList.add('hidden');
-          } else if (g._mode === 'arena') {
-            let alive = 0;
-            if (g.snakes) {
-              for (let i = 0; i < g.snakes.length; i++) {
-                const s = g.snakes[i];
-                if (s !== g.player && s.alive) alive++;
-              }
-            }
-            const txt = `SNAKES: ${alive}`;
-            if (txt !== _prevSnakesText) {
-              _prevSnakesText = txt;
-              snakesEl.textContent = txt;
-            }
-            snakesEl.classList.remove('hidden');
-            timerEl.classList.add('hidden');
           } else {
             timerEl.classList.add('hidden');
-            snakesEl.classList.add('hidden');
           }
         }
       }
