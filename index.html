@@ -45,6 +45,8 @@
         <li class="hint-new">👻 Ghost — pass through snake bodies for 4s</li>
         <li class="hint-new">💣 Mine — drop explosive traps every 2s</li>
         <li class="hint-new">⚡ Speed Boost — 40% faster for 5s</li>
+        <li class="hint-new">🧲 A small passive magnet always pulls nearby food toward you</li>
+        <li class="hint-new">⚔️ Pick a Skill before each run — trigger it with SPACE</li>
       </ul>
 
       <div id="score-display" style="display:none;">
@@ -126,6 +128,21 @@
     </div>
   </div>
 
+  <!-- Skill Select — shown after tapping Play, before the run starts -->
+  <div id="skill-select-screen" class="hidden">
+    <div id="skill-select-content">
+      <h2 id="skill-select-title">⚔️ Choose Your Skill</h2>
+      <p id="skill-select-subtitle">One active ability per run. Trigger it with SPACE or the skill button in-game.</p>
+
+      <div id="skill-select-grid"></div>
+
+      <div id="skill-select-actions">
+        <button id="skill-back-btn">← Back</button>
+        <button id="skill-confirm-btn">Confirm & Play</button>
+      </div>
+    </div>
+  </div>
+
   <!-- HUD: score + length + lives + power-ups + boost indicator -->
   <div id="hud">
     <span id="hud-name-score">Score: 0</span>
@@ -139,6 +156,11 @@
     <span id="hud-timer" class="hidden"></span>
     <span id="hud-powerups"></span>
     <span id="hud-boost" class="hud-boost-off">⚡ Hold to boost</span>
+    <button id="skill-btn" class="no-skill" title="Trigger skill (Space)">
+      <span class="skill-cooldown-ring" id="skill-cooldown-ring"></span>
+      <span id="skill-btn-icon">✦</span>
+      <span class="skill-cooldown-text" id="skill-cooldown-text"></span>
+    </button>
     <button id="pause-btn" aria-label="Pause game" title="Pause">⏸</button>
   </div>
 
@@ -175,12 +197,18 @@
       const boostEl    = document.getElementById('hud-boost');
       const powerupsEl = document.getElementById('hud-powerups');
       const timerEl    = document.getElementById('hud-timer');
+      const skillBtn   = document.getElementById('skill-btn');
+      const skillIconEl = document.getElementById('skill-btn-icon');
+      const skillRingEl = document.getElementById('skill-cooldown-ring');
+      const skillTextEl = document.getElementById('skill-cooldown-text');
 
       const HUD_INTERVAL = 100; // ms between HUD DOM updates (~10/sec)
       let _lastTick = 0;
       let _prevBadges = null;
       let _prevBoost  = null;
       let _prevTimerText = null;
+      let _prevSkillState = null; // 'none' | 'ready' | 'cooldown' | 'active'
+      let _prevSkillId = null;
 
       function tick(now) {
         requestAnimationFrame(tick);
@@ -210,6 +238,46 @@
           if (badges !== _prevBadges) {
             _prevBadges = badges;
             powerupsEl.innerHTML = badges;
+          }
+
+          // Skill button — icon, cooldown ring, active/ready/cooldown state
+          if (skillBtn) {
+            const skillId = p.skillId;
+            if (!skillId) {
+              if (_prevSkillState !== 'none') {
+                _prevSkillState = 'none';
+                skillBtn.classList.add('no-skill');
+              }
+            } else {
+              const def = (window.SKILLS && window.SKILLS[skillId]) || null;
+              if (skillId !== _prevSkillId && skillIconEl && def) {
+                _prevSkillId = skillId;
+                skillIconEl.textContent = def.icon;
+                skillBtn.title = `${def.name} (Space)`;
+              }
+              skillBtn.classList.remove('no-skill');
+
+              let state, ringPct = 0, text = '';
+              if (p.skillActiveTimer > 0) {
+                state = 'active';
+                text  = `${Math.ceil(p.skillActiveTimer)}s`;
+              } else if (p.skillCooldownTimer > 0 && def) {
+                state = 'cooldown';
+                ringPct = Math.round((p.skillCooldownTimer / def.cooldown) * 100);
+                text = `${Math.ceil(p.skillCooldownTimer)}s`;
+              } else {
+                state = 'ready';
+                text = '';
+              }
+
+              if (state !== _prevSkillState || text !== skillTextEl.textContent) {
+                _prevSkillState = state;
+                skillBtn.classList.toggle('skill-active', state === 'active');
+                skillBtn.classList.toggle('on-cooldown', state === 'cooldown');
+                if (skillTextEl) skillTextEl.textContent = text;
+              }
+              if (skillRingEl) skillRingEl.style.setProperty('--cd', String(ringPct));
+            }
           }
 
           // Time Trial timer
