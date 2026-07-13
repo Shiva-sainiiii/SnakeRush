@@ -137,7 +137,6 @@
       <span class="life-heart" id="heart-3">❤️</span>
     </span>
     <span id="hud-timer" class="hidden"></span>
-    <span id="hud-daynight" class="hidden">☀️</span>
     <span id="hud-powerups"></span>
     <span id="hud-boost" class="hud-boost-off">⚡ Hold to boost</span>
     <button id="pause-btn" aria-label="Pause game" title="Pause">⏸</button>
@@ -176,14 +175,12 @@
       const boostEl    = document.getElementById('hud-boost');
       const powerupsEl = document.getElementById('hud-powerups');
       const timerEl    = document.getElementById('hud-timer');
-      const daynightEl = document.getElementById('hud-daynight');
 
       const HUD_INTERVAL = 100; // ms between HUD DOM updates (~10/sec)
       let _lastTick = 0;
       let _prevBadges = null;
       let _prevBoost  = null;
       let _prevTimerText = null;
-      let _prevDayNightIcon = null;
 
       function tick(now) {
         requestAnimationFrame(tick);
@@ -227,20 +224,6 @@
             timerEl.classList.remove('hidden');
           } else {
             timerEl.classList.add('hidden');
-          }
-
-          // Day/Night indicator
-          if (g._dayNightEnabled && typeof g._getDarkness === 'function') {
-            const darkness = g._getDarkness();
-            const icon = darkness > 0.28 ? '🌙' : '☀️';
-            if (icon !== _prevDayNightIcon) {
-              _prevDayNightIcon = icon;
-              daynightEl.textContent = icon;
-            }
-            daynightEl.style.opacity = (0.55 + darkness * 0.9).toFixed(2);
-            daynightEl.classList.remove('hidden');
-          } else {
-            daynightEl.classList.add('hidden');
           }
         }
       }
