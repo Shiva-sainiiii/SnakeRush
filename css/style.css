@@ -217,6 +217,15 @@ html, body {
   to   { opacity: 1; text-shadow: 0 0 10px rgba(255,60,60,0.8); }
 }
 
+/* Day/Night indicator — opacity itself is driven from JS (tracks darkness
+   level continuously), this just makes the change feel smooth rather than
+   stepping abruptly each HUD tick. */
+#hud-daynight {
+  font-size: 1rem;
+  padding: 6px 10px;
+  transition: opacity 0.4s ease;
+}
+
 /* ─── Overlay ───────────────────────────────────────────────── */
 #overlay {
   position: fixed;
