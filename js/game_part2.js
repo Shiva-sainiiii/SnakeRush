@@ -708,7 +708,7 @@ const AI_STATE = Object.freeze({
 });
 
 const HYSTERESIS = {
-  PURSUE:    { enter: 0.25, exit: 0.40 },
+  PURSUE:    { enter: 0.12, exit: 0.40 },
   FLEE:      { enter: 0.15, exit: 0.50 },
   AVOID:     { enter: 0.05, exit: 0.20 },
   SEEK_FOOD: { enter: 0.0,  exit: 0.10 },
@@ -810,11 +810,25 @@ class AISnake extends Snake {
     // Personality-adjusted parameters
     this.FOOD_RADIUS     = 180;
     this.SNAKE_SENSE_R   = 220;
-    this.BODY_SENSE_R    = 90;
-    this.LOOKAHEAD_STEPS = 3;
-    this.LOOKAHEAD_DIST  = 30;
-    this.MAX_FORCE  = 0.12;
-    this.STEER_LERP = 6.0;
+    this.BODY_SENSE_R    = 110;
+    // Lookahead was 3 steps x 30 units = 90 units total — barely more than
+    // one body-length, so the AI often didn't "see" a wall or a body until
+    // it was nearly touching it. Longer/farther lookahead lets it react
+    // like it's actually planning ahead instead of noticing at the last
+    // possible instant.
+    this.LOOKAHEAD_STEPS = 5;
+    this.LOOKAHEAD_DIST  = 42;
+    // MAX_FORCE/STEER_LERP were fixed at values tuned for gentle wandering,
+    // which made every snake feel the same and slow to react even when
+    // chasing or fleeing. Raised across the board; _applyPersonality()
+    // further differentiates aggressive/hunter (sharper) from farmer/coward
+    // (comparatively gentler) below.
+    this.MAX_FORCE  = 0.20;
+    this.STEER_LERP = 8.0;
+    // Multiplier applied on top of STEER_LERP only during hard-priority
+    // danger avoidance (see update()) — makes the "about to hit something"
+    // turn noticeably snappier than everyday steering.
+    this._urgentTurnMul = 1.8;
     this.pursueThreshold = 8;   // sizeDiff needed to pursue
     this.fleeThreshold   = 8;   // sizeDiff needed to flee
 
@@ -835,15 +849,26 @@ class AISnake extends Snake {
         this.pursueThreshold = 4;
         this.fleeThreshold   = 25;
         this.speed = BASE_SPEED * speciesSpeedMul * 1.08;
+        // Sharpest turning of any personality — an aggressive snake that
+        // corners its prey should actually be able to corner it, not
+        // overshoot every turn.
+        this.MAX_FORCE  = 0.26;
+        this.STEER_LERP = 10.0;
         break;
       case 'coward':
         this.pursueThreshold = 30;
         this.fleeThreshold   = 4;
         this.speed = BASE_SPEED * speciesSpeedMul * 0.95;
+        // Cowards still need to juke effectively when fleeing, so keep
+        // turning reasonably sharp despite being slower overall.
+        this.MAX_FORCE  = 0.22;
+        this.STEER_LERP = 9.0;
         break;
       case 'hunter':
         this.SNAKE_SENSE_R = 380;
         this.speed = BASE_SPEED * speciesSpeedMul * 1.05;
+        this.MAX_FORCE  = 0.24;
+        this.STEER_LERP = 9.5;
         break;
       case 'boss':
         // Relentless: huge sense radius, barely ever flees, always willing
@@ -854,12 +879,18 @@ class AISnake extends Snake {
         this.pursueThreshold = -999; // pursue almost anything
         this.fleeThreshold   = 999;  // effectively never flees
         this.speed = BASE_SPEED * speciesSpeedMul * 1.03;
+        // A Titan is big, but still needs to actually turn to chase —
+        // otherwise its size becomes a liability instead of a threat.
+        this.MAX_FORCE  = 0.18;
+        this.STEER_LERP = 7.0;
         break;
       case 'farmer':
         this.FOOD_RADIUS   = 320;
         this.SNAKE_SENSE_R = 80;
         this.pursueThreshold = 999;
         this.speed = BASE_SPEED * speciesSpeedMul;
+        // Farmers aren't fighters — leave steering at the (already raised)
+        // base values rather than sharpening further.
         break;
       default:
         this.speed = BASE_SPEED * speciesSpeedMul;
@@ -870,12 +901,41 @@ class AISnake extends Snake {
     if (!this.alive) return;
     const { nearbyFood, fleeTarget, pursueTarget, avoidNormal } = this._sense();
     this.state = this._evalFSM(dt, nearbyFood, fleeTarget, pursueTarget, avoidNormal);
-    let force = this._computeForce(dt, nearbyFood, fleeTarget, pursueTarget, avoidNormal);
-    const wallForce = this._wallAvoidForce();
-    if (wallForce) force = force.add(wallForce);
-    const clamped = force.clamp(this.MAX_FORCE);
-    const lerpT   = Math.min(1, this.STEER_LERP * dt);
-    this.dir = this.dir.lerp(this.dir.add(clamped), lerpT).normalize();
+
+    // ── Priority steering ──────────────────────────────────────
+    // Previously, wall-avoidance and body-avoidance forces were summed
+    // together with normal wander/pursue/flee steering and THEN clamped to
+    // a single MAX_FORCE. That meant a strong "turn away from the wall"
+    // signal could get averaged down to near-nothing by whatever the snake
+    // was already doing (chasing food, pursuing prey), so it kept drifting
+    // straight into boundaries and into each other. Now, close-range wall
+    // and body danger is treated as a hard override: if the snake is
+    // genuinely close to a collision, that force alone drives steering
+    // (at a faster turn rate), instead of being diluted into an average.
+    const dangerWall = this._wallDangerForce();
+    const dangerBody = this._bodyDangerForce();
+
+    let force, lerpT;
+    if (dangerWall || dangerBody) {
+      // Blend the two danger sources if both are present (e.g. cornered
+      // near a wall with another snake's body also close), otherwise use
+      // whichever fired.
+      force = dangerWall && dangerBody ? dangerWall.add(dangerBody).normalize()
+            : (dangerWall || dangerBody);
+      lerpT = Math.min(1, this.STEER_LERP * this._urgentTurnMul * dt);
+    } else {
+      let normalForce = this._computeForce(dt, nearbyFood, fleeTarget, pursueTarget, avoidNormal);
+      // Soft wall/body cushioning still applies during normal steering so
+      // the AI naturally curves away well before it'd ever need the hard
+      // override above — the override is a last-resort safety net, not
+      // the primary way snakes avoid the edge.
+      const softWall = this._wallAvoidForce();
+      if (softWall) normalForce = normalForce.add(softWall);
+      force = normalForce.clamp(this.MAX_FORCE);
+      lerpT = Math.min(1, this.STEER_LERP * dt);
+    }
+
+    this.dir = this.dir.lerp(this.dir.add(force), lerpT).normalize();
     const personalityMul = this.personality === 'aggressive' ? 1.08
                           : this.personality === 'coward'    ? 0.95
                           : this.personality === 'hunter'    ? 1.05
@@ -1023,16 +1083,70 @@ class AISnake extends Snake {
     return this.seek(target);
   }
 
+  // Soft steering: gently curves the snake away from the boundary well
+  // before it's in real danger. This alone used to be the only wall
+  // defense, and it was easy for it to get averaged down to nothing when
+  // combined with a strong pursue/flee force under one MAX_FORCE clamp —
+  // see _wallDangerForce() below for the hard-priority backstop.
   _wallAvoidForce() {
-    const MARGIN_OUTER = 160, MARGIN_INNER = 60;
+    const world = window._GAME_WORLD;
+    const W = world ? world.w : WORLD_W, H = world ? world.h : WORLD_H;
+    const MARGIN_OUTER = 220, MARGIN_INNER = 80;
     let px = 0, py = 0;
     const hx = this.head.x, hy = this.head.y;
     const push = (dist) => dist < MARGIN_OUTER ? (1 - Math.max(0, (dist - MARGIN_INNER) / (MARGIN_OUTER - MARGIN_INNER))) : 0;
-    px +=  push(hx); px -= push(WORLD_W - hx);
-    py +=  push(hy); py -= push(WORLD_H - hy);
+    px +=  push(hx); px -= push(W - hx);
+    py +=  push(hy); py -= push(H - hy);
     if (px === 0 && py === 0) return null;
     const len = Math.sqrt(px * px + py * py);
     return new Vector2(px / len, py / len).scale(0.3);
+  }
+
+  // Hard priority: fires only when genuinely close to the boundary (closer
+  // than the soft margin above ever lets it get under normal steering).
+  // When this returns non-null, update() uses it directly instead of
+  // blending it into the normal weighted-sum steering — a snake this close
+  // to the wall needs to turn NOW, not "somewhat more than it was going to".
+  _wallDangerForce() {
+    const world = window._GAME_WORLD;
+    const W = world ? world.w : WORLD_W, H = world ? world.h : WORLD_H;
+    const DANGER = 70;
+    const hx = this.head.x, hy = this.head.y;
+    const distToEdge = Math.min(hx, W - hx, hy, H - hy);
+    if (distToEdge >= DANGER) return null;
+
+    // Steer toward world center — simple, always correct regardless of
+    // which edge (or corner) triggered it.
+    const cx = W / 2, cy = H / 2;
+    const toCenter = new Vector2(cx - hx, cy - hy);
+    if (toCenter.length() < 1e-6) return this.dir; // degenerate: already at center
+    return toCenter.normalize();
+  }
+
+  // Hard priority body-collision override: fires only when a lookahead
+  // probe finds another snake's segment inside a tighter, closer-range
+  // radius than the FSM's AVOID state normally reacts to. This is the
+  // last-resort "about to hit something" case, not the everyday steering.
+  _bodyDangerForce() {
+    const DANGER_DIST = SEGMENT_R_BASE * 3.2;
+    const dangerDsq = DANGER_DIST * DANGER_DIST;
+    const hx = this.head.x, hy = this.head.y;
+    for (const other of this.snakes) {
+      if (other === this || !other.alive) continue;
+      if (Vector2.distSq(this.head, other.head) > (this.BODY_SENSE_R + other.length * SEGMENT_GAP) * (this.BODY_SENSE_R + other.length * SEGMENT_GAP)) continue;
+      for (let i = 1; i < other.segments.length; i++) {
+        const seg = other.segments[i];
+        const dx = hx - seg.x, dy = hy - seg.y;
+        if (dx * dx + dy * dy < dangerDsq) {
+          // Steer perpendicular to current heading, away from the segment.
+          const away = new Vector2(dx, dy);
+          const len = away.length();
+          if (len < 1e-6) continue;
+          return away.scale(1 / len);
+        }
+      }
+    }
+    return null;
   }
 }
 
