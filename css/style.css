@@ -217,11 +217,6 @@ html, body {
   to   { opacity: 1; text-shadow: 0 0 10px rgba(255,60,60,0.8); }
 }
 
-#hud-snakes-remaining {
-  color: #ff9a4b;
-  font-weight: 700;
-}
-
 /* ─── Overlay ───────────────────────────────────────────────── */
 #overlay {
   position: fixed;
