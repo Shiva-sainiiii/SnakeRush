@@ -663,6 +663,8 @@ class AudioManager {
   nearsnake: 'assets/nearsnake.mp3',
   kill:      'assets/kill.mp3',
   lifeline:  'assets/lifeline.mp3',
+  bossroar:  'assets/bossroar.mp3',
+  bosskill:  'assets/bosskill.mp3',
 };
     const unlock = () => {
       this._init();
@@ -739,6 +741,8 @@ class AudioManager {
     this.stopBg(); this.stopPanic(); this.stopRun();
     this._play('gameover', false, 0.9);
   }
+  playBossRoar() { this._play('bossroar', false, 0.9); }
+  playBossKill() { this._play('bosskill', false, 1.0); }
   startPanic() {
     if (this._panicOn) return;
     this._panicNode = this._play('panic', true, 0.55);

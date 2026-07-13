@@ -910,6 +910,7 @@ class Game {
     // "you killed X" / "X eliminated" phrasing.
     this.killFeed.add('⚠️ A Titan Serpent has awoken!');
     this.shake.trigger(8, 0.3);
+    this.audio.playBossRoar();
   }
 
   _updateLivesHUD() {
@@ -1045,7 +1046,7 @@ class Game {
       this.shake.trigger(16, 0.5);
 
       if (triggeredByPlayer) {
-        this.audio.playKill();
+        this.audio.playBossKill();
         this._hitStopTimer = 0.12;
         this.killFeed.add('🏆 You slew the Titan Serpent!');
         // Direct score bonus on top of the food it drops below — killing
@@ -1055,6 +1056,7 @@ class Game {
         Profile.add('totalKills');
         this.achievements.onBossKill();
       } else {
+        this.audio.playBossKill();
         this.killFeed.add('💀 The Titan Serpent has fallen');
       }
     } else {
