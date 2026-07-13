@@ -622,6 +622,20 @@ class PlayerSnake extends Snake {
     this.mineTimer      = 0;
     this.speedBoostTimer = 0;
 
+    // ── Skills system (Free Fire style) ──────────────────────
+    // skillId: which skill this run's player picked on the skill-select
+    // screen (null = no skill / feature unavailable that run).
+    // skillActiveTimer: counts down while the skill's effect is live.
+    // skillCooldownTimer: counts down after use before it can fire again.
+    this.skillId            = null;
+    this.skillActiveTimer   = 0;
+    this.skillCooldownTimer = 0;
+    // Free-effect flags so a skill's speed/ghost/shield doesn't get
+    // confused with (or drain like) the equivalent food power-up.
+    this._skillSpeedActive  = false;
+    this._skillGhostActive  = false;
+    this._skillShieldActive = false;
+
     this._mineDeployAcc  = 0;
     this.activeMines     = [];  // Mine objects
   }
@@ -637,6 +651,13 @@ class PlayerSnake extends Snake {
     if (this.speedBoostTimer > 0) this.speedBoostTimer = Math.max(0, this.speedBoostTimer - dt);
     if (this.mineTimer     > 0) this.mineTimer     = Math.max(0, this.mineTimer     - dt);
 
+    // Skill cooldown / active timers
+    if (this.skillCooldownTimer > 0) this.skillCooldownTimer = Math.max(0, this.skillCooldownTimer - dt);
+    if (this.skillActiveTimer > 0) {
+      this.skillActiveTimer = Math.max(0, this.skillActiveTimer - dt);
+      if (this.skillActiveTimer <= 0) this._endSkillEffect();
+    }
+
     // Mine deployment
     if (this.mineTimer > 0 && this.activeMines.length < MINE_MAX) {
       this._mineDeployAcc += dt;
@@ -649,7 +670,7 @@ class PlayerSnake extends Snake {
     for (const m of this.activeMines) m.update(dt);
     this.activeMines = this.activeMines.filter(m => !m.expired);
 
-    const speedMul = this.speedBoostTimer > 0 ? SPEED_BOOST_MUL : 1;
+    const speedMul = (this.speedBoostTimer > 0 || this._skillSpeedActive) ? SPEED_BOOST_MUL : 1;
     const scaledBase  = this._calcSpeed(BASE_SPEED  * speedMul);
     const scaledBoost = this._calcSpeed(BOOST_SPEED * speedMul);
     this.speed = (this.boosting && this.segments.length > 6) ? scaledBoost : scaledBase;
@@ -695,8 +716,48 @@ class PlayerSnake extends Snake {
   activateMine()       { this.mineTimer = MINE_DURATION; this._mineDeployAcc = MINE_DEPLOY_INTERVAL; }
   activateSpeedBoost() { this.speedBoostTimer = SPEED_BOOST_DURATION; }
 
-  get invincible() { return this.iFrameTimer > 0 || this.shieldTimer > 0; }
-  get isGhost()    { return this.ghostTimer > 0; }
+  /* ── Skills (Free Fire style active ability) ────────────── */
+  get skillReady() {
+    return !!this.skillId && this.skillCooldownTimer <= 0 && this.skillActiveTimer <= 0;
+  }
+
+  // Returns true if the skill actually fired (false if not ready / none picked)
+  triggerSkill() {
+    if (!this.skillReady) return false;
+    const def = SKILLS[this.skillId];
+    if (!def) return false;
+
+    this.skillActiveTimer   = def.duration;
+    this.skillCooldownTimer = def.cooldown + def.duration;
+
+    switch (this.skillId) {
+      case 'magnetBoost':
+        // Reuses the exact power-up magnet radius/pull, just triggered
+        // manually instead of from food — keeps behavior consistent.
+        this.magnetTimer = Math.max(this.magnetTimer, def.duration);
+        break;
+      case 'speedSurge':
+        this._skillSpeedActive = true;
+        break;
+      case 'phantomDash':
+        this._skillGhostActive = true;
+        this._skillSpeedActive = true; // dash should feel fast, not just intangible
+        break;
+      case 'ironScale':
+        this._skillShieldActive = true;
+        break;
+    }
+    return true;
+  }
+
+  _endSkillEffect() {
+    this._skillSpeedActive  = false;
+    this._skillGhostActive  = false;
+    this._skillShieldActive = false;
+  }
+
+  get invincible() { return this.iFrameTimer > 0 || this.shieldTimer > 0 || this._skillShieldActive; }
+  get isGhost()    { return this.ghostTimer > 0 || this._skillGhostActive; }
 }
 
 /* ─────────────────────────────────────────────────────────────

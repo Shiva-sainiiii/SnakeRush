@@ -549,6 +549,13 @@ const IFRAME_DURATION    = 2.5;
 const MAGNET_DURATION    = 7;
 const MAGNET_RADIUS      = 280;
 const MAGNET_PULL_FORCE  = 220;
+
+// Baseline magnet: a small, always-on pull every run has regardless of the
+// Magnet power-up. Deliberately much weaker/shorter-range than the
+// power-up version so it just smooths out food collection a little without
+// trivializing the power-up or changing the game's difficulty curve.
+const BASELINE_MAGNET_RADIUS     = 100;
+const BASELINE_MAGNET_PULL_FORCE = 70;
 const ATTACK_DURATION    = 8;
 const SHIELD_DURATION    = 4;
 const GHOST_DURATION     = 4;
@@ -577,6 +584,52 @@ const DANGER_ZONE_DIST   = 250;
 
 // Boss Snake: seconds between Titan Serpent spawns (only one alive at a time)
 const BOSS_INTERVAL = 90;
+
+/* ─────────────────────────────────────────────────────────────
+   SKILLS SYSTEM — Free Fire style pre-round skill pick.
+   Each skill is an ACTIVE ability: player triggers it manually
+   (Space / tap the skill button), it runs for `duration` seconds,
+   then goes on `cooldown` before it can be used again. Exactly one
+   skill is chosen per run on the new skill-select screen.
+───────────────────────────────────────────────────────────── */
+const SKILL_KEY = 'snakeRush_selectedSkill';
+
+const SKILLS = {
+  magnetBoost: {
+    id: 'magnetBoost', name: 'Magnet Boost', icon: '🧲',
+    duration: 6, cooldown: 20,
+    tagline: 'Full-power food magnet on demand',
+    desc: 'Instantly pulls in food from a huge radius for 6s. Great for catching up in length fast.',
+  },
+  speedSurge: {
+    id: 'speedSurge', name: 'Speed Surge', icon: '⚡',
+    duration: 3, cooldown: 15,
+    tagline: 'Free burst of speed, no length cost',
+    desc: 'A 3s speed spike that costs no length (unlike boosting). Perfect for escapes or chases.',
+  },
+  phantomDash: {
+    id: 'phantomDash', name: 'Phantom Dash', icon: '👻',
+    duration: 1.5, cooldown: 18,
+    tagline: 'Short ghost dash through danger',
+    desc: 'Turns you briefly intangible and fast — dash straight through snake bodies to escape a trap.',
+  },
+  ironScale: {
+    id: 'ironScale', name: 'Iron Scale', icon: '🛡️',
+    duration: 3, cooldown: 25,
+    tagline: 'Emergency invincibility on command',
+    desc: 'Full invincibility for 3s whenever you need it most. Your emergency "get out of death free" button.',
+  },
+};
+const SKILL_LIST = Object.values(SKILLS);
+window.SKILLS = SKILLS;
+
+function getSelectedSkillId() {
+  const id = localStorage.getItem(SKILL_KEY);
+  return (id && SKILLS[id]) ? id : null;
+}
+function setSelectedSkillId(id) {
+  if (SKILLS[id]) localStorage.setItem(SKILL_KEY, id);
+}
 
 /* Designer palette */
 const DESIGNER_PALETTES = [
