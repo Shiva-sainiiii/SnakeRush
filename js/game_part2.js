@@ -554,6 +554,21 @@ class Snake {
       ctx.restore();
     }
 
+    // Boss aura — a slow pulsing red/gold double ring so the Titan Serpent
+    // reads as a threat from a distance. Only ever one boss on screen at a
+    // time, so this is negligible extra draw cost.
+    if (this.isBoss) {
+      const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.004);
+      ctx.save();
+      ctx.strokeStyle = `rgba(255,60,20,${(0.5 + pulse * 0.35).toFixed(2)})`;
+      ctx.lineWidth = 3; ctx.shadowColor = '#ff3c14'; ctx.shadowBlur = 24;
+      ctx.beginPath(); ctx.arc(hx, hy, segR * 2.2 + pulse * 5, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = `rgba(255,200,60,${(0.35 + pulse * 0.25).toFixed(2)})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(hx, hy, segR * 2.8 + pulse * 7, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+
     this._drawEyes(ctx, hx, hy, segR);
 
     if (isGhost) ctx.globalAlpha = 1;
@@ -734,6 +749,14 @@ const SNAKE_SPECIES = [
     minLen: 42, maxLen: 58,  radiusMul: 1.75, speedMul: 0.82,
     weight: 8,  scoreMul: 2.0,
   },
+  {
+    // Boss tier: weight 0 so pickSpecies() (used for normal AI spawns and
+    // respawns) never rolls this by chance — it's only ever assigned
+    // directly by the dedicated boss-spawn call in Game.
+    id: 'titan', label: 'Titan Serpent',
+    minLen: 95, maxLen: 130, radiusMul: 2.4, speedMul: 0.9,
+    weight: 0,  scoreMul: 5.0,
+  },
 ];
 const SNAKE_SPECIES_TOTAL_WEIGHT = SNAKE_SPECIES.reduce((s, sp) => s + sp.weight, 0);
 
@@ -749,11 +772,13 @@ function pickSpecies() {
 const AI_PERSONALITIES = ['aggressive', 'coward', 'hunter', 'farmer'];
 
 class AISnake extends Snake {
-  constructor(x, y, bodyColor, headColor, foodGrid, snakes) {
+  constructor(x, y, bodyColor, headColor, foodGrid, snakes, forcedSpecies = null) {
     // Species decides body plan (size + thickness + base speed multiplier);
     // spawn length is randomized within the species' adult range so AI
     // snakes appear at full size instead of always hatching as babies.
-    const species  = pickSpecies();
+    // forcedSpecies lets the boss-spawn call bypass the weighted random
+    // pick and assign the Titan Serpent tier directly.
+    const species  = forcedSpecies || pickSpecies();
     const spawnLen = species.minLen + Math.floor(Math.random() * (species.maxLen - species.minLen + 1));
 
     super(x, y, bodyColor, headColor, spawnLen);
@@ -762,15 +787,20 @@ class AISnake extends Snake {
     this.speciesRef = species; // cached reference, avoids per-frame array lookup
     this.radiusMul  = species.radiusMul;
     this.scoreMul   = species.scoreMul;
+    this.isBoss     = species.id === 'titan';
 
     this.foodGrid = foodGrid;
     this.snakes   = snakes;
     this.state    = AI_STATE.WANDER;
-    this.name     = generateName();
+    this.name     = this.isBoss ? 'Titan Serpent' : generateName();
 
     // Assign personality (independent of species — a Garter Snake can be
-    // aggressive, an Anaconda can be a coward, etc.)
-    this.personality = AI_PERSONALITIES[Math.floor(Math.random() * AI_PERSONALITIES.length)];
+    // aggressive, an Anaconda can be a coward, etc.). The boss always gets
+    // its own dedicated 'boss' personality — a relentless player-hunter —
+    // rather than a random roll.
+    this.personality = this.isBoss
+      ? 'boss'
+      : AI_PERSONALITIES[Math.floor(Math.random() * AI_PERSONALITIES.length)];
 
     this._wanderAngle  = Math.random() * Math.PI * 2;
     this._wanderDist   = 55;
@@ -815,6 +845,16 @@ class AISnake extends Snake {
         this.SNAKE_SENSE_R = 380;
         this.speed = BASE_SPEED * speciesSpeedMul * 1.05;
         break;
+      case 'boss':
+        // Relentless: huge sense radius, barely ever flees, always willing
+        // to pursue regardless of size difference (a Titan doesn't back
+        // down from anything smaller than itself, and rarely meets bigger).
+        this.SNAKE_SENSE_R   = 600;
+        this.FOOD_RADIUS     = 260;
+        this.pursueThreshold = -999; // pursue almost anything
+        this.fleeThreshold   = 999;  // effectively never flees
+        this.speed = BASE_SPEED * speciesSpeedMul * 1.03;
+        break;
       case 'farmer':
         this.FOOD_RADIUS   = 320;
         this.SNAKE_SENSE_R = 80;
@@ -839,6 +879,7 @@ class AISnake extends Snake {
     const personalityMul = this.personality === 'aggressive' ? 1.08
                           : this.personality === 'coward'    ? 0.95
                           : this.personality === 'hunter'    ? 1.05
+                          : this.personality === 'boss'      ? 1.03
                           : 1;
     const speciesMul = this.speciesRef ? this.speciesRef.speedMul : 1;
     this.speed = this._calcSpeed(BASE_SPEED * personalityMul * speciesMul);

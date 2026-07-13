@@ -262,9 +262,18 @@ Object.assign(Game.prototype, {
     for (let i = 1; i < this.snakes.length; i++) {
       const s = this.snakes[i];
       if (!s.alive) continue;
-      ctx.fillStyle = s.headColor;
+      if (s.isBoss) {
+        // Pulsing highlight so the Titan's location reads at a glance
+        // instead of blending in with the regular AI dots.
+        const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.006);
+        ctx.fillStyle = `rgba(255,${Math.round(60 + pulse * 100)},20,1)`;
+      } else {
+        ctx.fillStyle = s.headColor;
+      }
       ctx.beginPath();
-      const dotR = 2.5 * (s.radiusMul || 1);
+      // Boss dot uses a flat bump rather than the full 2.4x radiusMul —
+      // on a 150px minimap that would swallow nearby dots entirely.
+      const dotR = s.isBoss ? 5.5 : 2.5 * (s.radiusMul || 1);
       ctx.arc(MAP_X + s.head.x * SCALE_X, MAP_Y + s.head.y * SCALE_Y, dotR, 0, Math.PI * 2);
       ctx.fill();
     }

@@ -510,6 +510,15 @@ class Game {
     this._hitStopTimer  = 0;
     this._runStartTime  = performance.now();
 
+    // Boss Snake (Titan Serpent) timer — first one arrives at BOSS_INTERVAL
+    // seconds in, then again every BOSS_INTERVAL after the previous one
+    // dies, capped to one boss alive at a time. Skipped in Time Trial (a
+    // short focused sprint) and Daily Challenge (keeps that mode's
+    // difficulty predictable for fair seeded-run comparison).
+    this._bossEligible = this._mode === 'classic' && !DailyChallenge.isActive;
+    this._bossTimer    = BOSS_INTERVAL;
+    this._bossActive   = null;
+
     this.killFeed  = new KillFeed();
     this.combo.reset();
     this.shake     = new ScreenShake();
@@ -617,6 +626,18 @@ class Game {
     this.combo.update(dt);
     this.shake.update(dt);
     this.achievements.update(dt);
+
+    // Boss Snake timer
+    if (this._bossEligible) {
+      if (this._bossActive && !this._bossActive.alive) this._bossActive = null;
+      if (!this._bossActive) {
+        this._bossTimer -= dt;
+        if (this._bossTimer <= 0) {
+          this._spawnBoss();
+          this._bossTimer = BOSS_INTERVAL;
+        }
+      }
+    }
 
     // Time Trial countdown
     if (this._mode === 'timetrial') {
@@ -859,6 +880,38 @@ class Game {
     Profile.add('totalPlaytimeSeconds', dt);
   }
 
+  /* ── BOSS SNAKE ─────────────────────────────────────────── */
+  _spawnBoss() {
+    const W = this._worldW, H = this._worldH;
+    const titanSpecies = SNAKE_SPECIES.find(s => s.id === 'titan');
+    if (!titanSpecies) return;
+
+    // Spawn far from the player (bigger exclusion radius than normal AI
+    // respawns — a Titan appearing near the player should feel like an
+    // event, not an ambush).
+    let x, y, tries = 0;
+    do {
+      x = 300 + Math.random() * (W - 600);
+      y = 300 + Math.random() * (H - 600);
+      tries++;
+    } while (
+      this.player && this.player.alive &&
+      Vector2.distSq({ x, y }, this.player.head) < 900 * 900 &&
+      tries < 10
+    );
+
+    const boss = new AISnake(x, y, '#7a1010', '#ff3c14', this.foodGrid, this.snakes, titanSpecies);
+    this.snakes.push(boss);
+    this._bossActive = boss;
+
+    // Announcement — reuses the kill-feed's existing toast rendering so
+    // there's no new UI plumbing needed. Uses the raw add() (not
+    // addKill/addEliminated) since those wrap text with their own
+    // "you killed X" / "X eliminated" phrasing.
+    this.killFeed.add('⚠️ A Titan Serpent has awoken!');
+    this.shake.trigger(8, 0.3);
+  }
+
   _updateLivesHUD() {
     const lives = this.player.lives;
     this._heartEls.forEach((el, i) => {
@@ -986,18 +1039,37 @@ class Game {
     // AI death
     snake.alive = false;
     this.particles.burst(snake.segments, snake.headColor);
-    this.shake.trigger(6, 0.25);
 
-    if (triggeredByPlayer) {
-      this.audio.playKill();
-      this._hitStopTimer = 0.08;
-      const label = snake.speciesLabel ? `${snake.speciesLabel} ${snake.name || ''}`.trim() : (snake.name || 'Unknown');
-      this.killFeed.addKill(label);
-      Profile.add('totalKills');
-      this.achievements.onKill();
+    if (snake.isBoss) {
+      this._bossActive = null;
+      this.shake.trigger(16, 0.5);
+
+      if (triggeredByPlayer) {
+        this.audio.playKill();
+        this._hitStopTimer = 0.12;
+        this.killFeed.add('🏆 You slew the Titan Serpent!');
+        // Direct score bonus on top of the food it drops below — killing
+        // a boss should feel like a headline event, not just "one more
+        // snake down".
+        if (this.player.alive) this.player.score += 500;
+        Profile.add('totalKills');
+        this.achievements.onBossKill();
+      } else {
+        this.killFeed.add('💀 The Titan Serpent has fallen');
+      }
     } else {
-      const label = snake.speciesLabel ? `${snake.speciesLabel} ${snake.name || ''}`.trim() : (snake.name || 'Unknown');
-      this.killFeed.addEliminated(label);
+      this.shake.trigger(6, 0.25);
+      if (triggeredByPlayer) {
+        this.audio.playKill();
+        this._hitStopTimer = 0.08;
+        const label = snake.speciesLabel ? `${snake.speciesLabel} ${snake.name || ''}`.trim() : (snake.name || 'Unknown');
+        this.killFeed.addKill(label);
+        Profile.add('totalKills');
+        this.achievements.onKill();
+      } else {
+        const label = snake.speciesLabel ? `${snake.speciesLabel} ${snake.name || ''}`.trim() : (snake.name || 'Unknown');
+        this.killFeed.addEliminated(label);
+      }
     }
 
     // Drop food from dead snake

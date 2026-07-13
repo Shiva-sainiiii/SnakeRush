@@ -1,4 +1,3 @@
-
 /**
  * ═══════════════════════════════════════════════════════════════
  *  SNAKE RUSH — game.js  (Phase 4: Mega Update)
@@ -350,6 +349,7 @@ const ACHIEVEMENTS_DEF = [
   { id: 'exterminator',  name: 'Exterminator',    desc: 'Kill 5 snakes in one run.' },
   { id: 'speed_demon',   name: 'Speed Demon',     desc: 'Collect Speed Boost 3x in one run.' },
   { id: 'hoarder',       name: 'Hoarder',         desc: 'Eat 200 food in one run.' },
+  { id: 'boss_slayer',   name: 'Boss Slayer',     desc: 'Defeat a Titan Serpent.' },
 ];
 
 class AchievementManager {
@@ -404,6 +404,7 @@ class AchievementManager {
   onCombo10()    { this.unlock('combo_king'); }
   onSpeedBoost() { this.runSpeedBoosts++; if (this.runSpeedBoosts >= 3) this.unlock('speed_demon'); }
   onDeath()      { this.died = true; this.surviveTimer = 0; }
+  onBossKill()   { this.unlock('boss_slayer'); }
 
   update(dt) {
     if (!this.died) {
@@ -573,6 +574,9 @@ const SPEED_MAX_ON_MAP       = 1;
 
 const NEAR_SNAKE_RADIUS  = 100;
 const DANGER_ZONE_DIST   = 250;
+
+// Boss Snake: seconds between Titan Serpent spawns (only one alive at a time)
+const BOSS_INTERVAL = 90;
 
 /* Designer palette */
 const DESIGNER_PALETTES = [
