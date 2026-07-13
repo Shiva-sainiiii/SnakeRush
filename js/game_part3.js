@@ -519,6 +519,14 @@ class Game {
     this._bossTimer    = BOSS_INTERVAL;
     this._bossActive   = null;
 
+    // Day/Night cycle — continuous timer driving a sin-wave darkness level.
+    // Starts at 0 so every fresh run opens in full daylight (darkness=0);
+    // the cycle then eases toward night over the first half of the period.
+    // Only runs in Classic — Time Trial is a 120s sprint too short for a
+    // 180s lighting cycle to mean anything.
+    this._dayNightEnabled = this._mode === 'classic';
+    this._dayNightTimer   = 0;
+
     this.killFeed  = new KillFeed();
     this.combo.reset();
     this.shake     = new ScreenShake();
@@ -627,6 +635,9 @@ class Game {
     this.shake.update(dt);
     this.achievements.update(dt);
 
+    // Day/Night cycle
+    if (this._dayNightEnabled) this._dayNightTimer += dt;
+
     // Boss Snake timer
     if (this._bossEligible) {
       if (this._bossActive && !this._bossActive.alive) this._bossActive = null;
@@ -661,7 +672,19 @@ class Game {
     }
 
     // AI
-    for (let i = 1; i < this.snakes.length; i++) this.snakes[i].update(dt);
+    // At night, AI snakes see less far too (matches the player's own
+    // reduced visibility from the vignette) — except the boss, which
+    // hunts just as relentlessly regardless of time of day.
+    const nightSenseMul = this._dayNightEnabled
+      ? 1 - (this._getDarkness() / NIGHT_MAX_DARKNESS) * 0.35
+      : 1;
+    for (let i = 1; i < this.snakes.length; i++) {
+      const s = this.snakes[i];
+      if (s._baseSenseR !== undefined) {
+        s.SNAKE_SENSE_R = s.isBoss ? s._baseSenseR : s._baseSenseR * nightSenseMul;
+      }
+      s.update(dt);
+    }
 
     // Camera — must use LOGICAL pixel dimensions, not canvas.width/height
     // (canvas.width is now physW = logW × dpr; dividing by dpr gives logW)
@@ -878,6 +901,25 @@ class Game {
 
     // Playtime
     Profile.add('totalPlaytimeSeconds', dt);
+  }
+
+  /* ── DAY/NIGHT CYCLE ────────────────────────────────────── */
+  // Returns current darkness level: 0 (full daylight) to NIGHT_MAX_DARKNESS
+  // (peak night). A cosine wave keeps it smooth and continuous; disabled
+  // modes (Time Trial) just always report 0 (full daylight).
+  _getDarkness() {
+    if (!this._dayNightEnabled) return 0;
+    const phase = (this._dayNightTimer / DAY_NIGHT_PERIOD) * Math.PI * 2;
+    // wave: 0 at t=0 (full daylight), rises to 1 at half-period (peak
+    // night), back to 0 at full period (daylight again).
+    const wave = (1 - Math.cos(phase)) / 2;
+    return wave * NIGHT_MAX_DARKNESS;
+  }
+
+  // True once darkness has crossed roughly halfway to peak — used to gate
+  // gameplay effects (AI vision, etc.) rather than the raw continuous value.
+  _isNight() {
+    return this._getDarkness() > NIGHT_MAX_DARKNESS * 0.5;
   }
 
   /* ── BOSS SNAKE ─────────────────────────────────────────── */

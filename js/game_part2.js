@@ -92,6 +92,21 @@ class Food {
     if (this.ttl !== null && this.ttl < 3) alpha = Math.max(0, this.ttl / 3);
     ctx.globalAlpha = alpha;
 
+    // Night visibility boost — a soft extra halo drawn underneath the
+    // normal per-type rendering below, so food stays easy to spot in the
+    // dark without needing to touch each food type's own glow values.
+    const darkness = window._game && window._game._getDarkness ? window._game._getDarkness() : 0;
+    if (darkness > 0.05) {
+      ctx.save();
+      ctx.globalAlpha = alpha * darkness * 0.6;
+      ctx.shadowColor = this.color;
+      ctx.shadowBlur  = 22;
+      ctx.beginPath(); ctx.arc(sx, sy, r * 1.4, 0, Math.PI * 2);
+      ctx.fillStyle = this.color; ctx.fill();
+      ctx.restore();
+      ctx.globalAlpha = alpha;
+    }
+
     if (this.type === FOOD_TYPE.NORMAL) {
       ctx.shadowColor = this.color; ctx.shadowBlur = 8 + pulse * 6;
       ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2);
@@ -823,6 +838,9 @@ class AISnake extends Snake {
     // both into a single combined multiplier applied last.
     this.speed = BASE_SPEED * species.speedMul;
     this._applyPersonality(species.speedMul);
+    // Cached so the day/night system can scale sense radius at night
+    // without needing to know each personality's base value.
+    this._baseSenseR = this.SNAKE_SENSE_R;
 
     this._hyst = { PURSUE: 0, FLEE: 0, AVOID: 0, SEEK_FOOD: 0 };
     this._fleeTarget = null; this._pursueTarget = null; this._avoidNormal = null;
