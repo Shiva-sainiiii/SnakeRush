@@ -913,7 +913,7 @@ class AISnake extends Snake {
     // genuinely close to a collision, that force alone drives steering
     // (at a faster turn rate), instead of being diluted into an average.
     const dangerWall = this._wallDangerForce();
-    const dangerBody = this._bodyDangerForce(pursueTarget);
+    const dangerBody = this._bodyDangerForce();
 
     let force, lerpT;
     if (dangerWall || dangerBody) {
@@ -980,13 +980,6 @@ class AISnake extends Snake {
       const hitRadSq = (SEGMENT_R_BASE * 2.2) * (SEGMENT_R_BASE * 2.2);
       for (const other of this.snakes) {
         if (other === this || !other.alive) continue;
-        // Skip the snake we're actively pursuing — otherwise closing in
-        // for the kill constantly re-triggers avoidance the moment the
-        // target's own body/tail is nearby (which it always will be during
-        // a chase), and AVOID outranks PURSUE below, so the AI would
-        // flinch away and cancel its own attack right as it got close
-        // enough to land it.
-        if (other === pursueTarget) continue;
         if (Vector2.distSq(this.head, other.head) > (this.BODY_SENSE_R + other.length * SEGMENT_GAP) * (this.BODY_SENSE_R + other.length * SEGMENT_GAP)) continue;
         for (const seg of other.segments) {
           const dx = probeX - seg.x, dy = probeY - seg.y;
@@ -1134,19 +1127,12 @@ class AISnake extends Snake {
   // probe finds another snake's segment inside a tighter, closer-range
   // radius than the FSM's AVOID state normally reacts to. This is the
   // last-resort "about to hit something" case, not the everyday steering.
-  //
-  // `pursueTarget` is excluded on purpose: a snake actively attacking prey
-  // needs to be willing to close in on that prey's body to land the kill.
-  // Without this exclusion, aggressive/hunter AI would flinch away and
-  // abandon the chase the instant the prey's tail curved nearby, making
-  // them feel passive no matter how aggressive their personality was set.
-  _bodyDangerForce(pursueTarget = null) {
+  _bodyDangerForce() {
     const DANGER_DIST = SEGMENT_R_BASE * 3.2;
     const dangerDsq = DANGER_DIST * DANGER_DIST;
     const hx = this.head.x, hy = this.head.y;
     for (const other of this.snakes) {
       if (other === this || !other.alive) continue;
-      if (other === pursueTarget) continue;
       if (Vector2.distSq(this.head, other.head) > (this.BODY_SENSE_R + other.length * SEGMENT_GAP) * (this.BODY_SENSE_R + other.length * SEGMENT_GAP)) continue;
       for (let i = 1; i < other.segments.length; i++) {
         const seg = other.segments[i];
