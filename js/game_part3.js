@@ -712,7 +712,13 @@ class Game {
         if (food.type !== FOOD_TYPE.NORMAL) continue;
         const dx = this.player.head.x - food.pos.x, dy = this.player.head.y - food.pos.y;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const strength = (1 - dist / radius) * pullForce * dt;
+        let strength = (1 - dist / radius) * pullForce * dt;
+        // Cap the step to the remaining distance so a strong pull force
+        // can never overshoot past the head in one frame — without this,
+        // food that's very close would fly through to the far side and
+        // get yanked back next frame, repeating every frame and looking
+        // like it's being repelled instead of pulled in.
+        if (strength > dist) strength = dist;
         this.foodGrid.remove(food);
         food.pos.x += (dx / dist) * strength;
         food.pos.y += (dy / dist) * strength;
