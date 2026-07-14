@@ -554,8 +554,18 @@ const MAGNET_PULL_FORCE  = 220;
 // than the power-up version above. Meant to take the edge off manually
 // chasing every nearby food pellet (especially now that AI reacts faster),
 // not to replace normal food-seeking. Player-only; AI snakes don't get it.
-const PASSIVE_MAGNET_RADIUS = 70;
-const PASSIVE_MAGNET_FORCE  = 300;
+//
+// Note on tuning: the player's own movement speed (130-220 with boost) is
+// much faster than food's pull speed can be across most of this radius
+// with a plain linear (1 - dist/radius) falloff — food near the outer edge
+// gets barely any pull, so if the player is moving away from it, the food
+// visually "loses the race" and looks like it's fleeing even though it's
+// still technically being pulled. PASSIVE_MAGNET_MIN_STRENGTH sets a floor
+// so pull is meaningful across the whole radius, not just right next to
+// the head.
+const PASSIVE_MAGNET_RADIUS       = 70;
+const PASSIVE_MAGNET_FORCE        = 300;
+const PASSIVE_MAGNET_MIN_STRENGTH = 0.45; // floor as a fraction of full falloff (0..1)
 
 const ATTACK_DURATION    = 8;
 const SHIELD_DURATION    = 4;
