@@ -712,7 +712,14 @@ class Game {
         if (food.type !== FOOD_TYPE.NORMAL) continue;
         const dx = this.player.head.x - food.pos.x, dy = this.player.head.y - food.pos.y;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        let strength = (1 - dist / radius) * pullForce * dt;
+        let falloff = 1 - dist / radius;
+        // Passive magnet only: floor the falloff so pull stays meaningful
+        // near the edge of its (small) radius, not just right at the head.
+        // Without this, food caught near the outer edge while the player
+        // moves away could never catch up — it looked like it was fleeing
+        // even though it was technically still being pulled.
+        if (!usingPowerup) falloff = Math.max(falloff, PASSIVE_MAGNET_MIN_STRENGTH);
+        let strength = falloff * pullForce * dt;
         // Cap the step to the remaining distance so a strong pull force
         // can never overshoot past the head in one frame — without this,
         // food that's very close would fly through to the far side and
