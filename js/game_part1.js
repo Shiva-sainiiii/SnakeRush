@@ -555,7 +555,7 @@ const MAGNET_PULL_FORCE  = 220;
 // chasing every nearby food pellet (especially now that AI reacts faster),
 // not to replace normal food-seeking. Player-only; AI snakes don't get it.
 const PASSIVE_MAGNET_RADIUS = 70;
-const PASSIVE_MAGNET_FORCE  = 90;
+const PASSIVE_MAGNET_FORCE  = 300;
 
 const ATTACK_DURATION    = 8;
 const SHIELD_DURATION    = 4;
