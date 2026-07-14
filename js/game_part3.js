@@ -88,8 +88,7 @@ class Game {
     this._setupPlayerName();
     this._setupStats();
     this._updateAchievementCount();
-    this._setupSkillSelect();
-    this.startBtn.addEventListener('click', () => this._showSkillSelect());
+    this.startBtn.addEventListener('click', () => this.startGame());
     window._game = this;
 
     // Show daily badge if applicable
@@ -228,15 +227,6 @@ class Game {
     if (this.restartBtn) this.restartBtn.addEventListener('click', () => this.restartGame());
     if (this.exitBtn)    this.exitBtn.addEventListener('click', () => this.exitToMenu());
 
-    // Skill button (mobile/tap trigger — Space bar also works, see keydown below)
-    this.skillBtn = document.getElementById('skill-btn');
-    if (this.skillBtn) {
-      this.skillBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (this.running && !this.paused) this._tryTriggerSkill();
-      });
-    }
-
     // Auto-pause when the tab/app goes into the background, so the snake
     // doesn't keep moving (and potentially die) with no input while the
     // player isn't looking at the screen.
@@ -249,10 +239,6 @@ class Game {
     document.addEventListener('keydown', e => {
       if ((e.key === 'Escape' || e.key === 'p' || e.key === 'P') && this.running) {
         if (this.paused) this.resumeGame(); else this.pauseGame();
-      }
-      if (e.code === 'Space' && this.running && !this.paused && this.player) {
-        e.preventDefault();
-        this._tryTriggerSkill();
       }
     });
 
@@ -388,70 +374,6 @@ class Game {
     }
   }
 
-  /* ── SKILL SELECT SCREEN ────────────────────────────────── */
-  _setupSkillSelect() {
-    this.skillSelectScreen = document.getElementById('skill-select-screen');
-    this.skillConfirmBtn   = document.getElementById('skill-confirm-btn');
-    this.skillBackBtn      = document.getElementById('skill-back-btn');
-    if (!this.skillSelectScreen) return; // markup not present — feature no-ops safely
-
-    this._pendingSkillId = getSelectedSkillId() || 'magnetBoost';
-
-    const grid = document.getElementById('skill-select-grid');
-    if (grid && !grid.dataset.built) {
-      grid.dataset.built = '1';
-      grid.innerHTML = '';
-      SKILL_LIST.forEach(def => {
-        const card = document.createElement('button');
-        card.type = 'button';
-        card.className = 'skill-card';
-        card.dataset.skill = def.id;
-        card.innerHTML = `
-          <span class="skill-card-icon">${def.icon}</span>
-          <span class="skill-card-name">${def.name}</span>
-          <span class="skill-card-tagline">${def.tagline}</span>
-          <span class="skill-card-stats">⏱ ${def.duration}s active · ${def.cooldown}s cooldown</span>
-          <span class="skill-card-desc">${def.desc}</span>
-        `;
-        card.addEventListener('click', () => {
-          grid.querySelectorAll('.skill-card').forEach(c => c.classList.remove('active'));
-          card.classList.add('active');
-          this._pendingSkillId = def.id;
-        });
-        grid.appendChild(card);
-      });
-    }
-
-    if (this.skillConfirmBtn) {
-      this.skillConfirmBtn.addEventListener('click', () => {
-        setSelectedSkillId(this._pendingSkillId);
-        this.skillSelectScreen.classList.add('hidden');
-        this.startGame();
-      });
-    }
-    if (this.skillBackBtn) {
-      this.skillBackBtn.addEventListener('click', () => {
-        this.skillSelectScreen.classList.add('hidden');
-        this.overlay.classList.remove('hidden');
-      });
-    }
-  }
-
-  _showSkillSelect() {
-    if (!this.skillSelectScreen) { this.startGame(); return; } // safe fallback
-
-    this.overlay.classList.add('hidden');
-
-    // Reflect currently-saved (or default) choice as active card
-    const saved = getSelectedSkillId() || 'magnetBoost';
-    this._pendingSkillId = saved;
-    document.querySelectorAll('.skill-card').forEach(c => {
-      c.classList.toggle('active', c.dataset.skill === saved);
-    });
-
-    this.skillSelectScreen.classList.remove('hidden');
-  }
-
   /* ── SETTINGS UI ────────────────────────────────────────── */
   _setupSettings() {
     // Mute toggle
@@ -553,7 +475,6 @@ class Game {
     this.snakes   = [];
     this.player   = new PlayerSnake(worldW / 2, worldH / 2);
     this.player.name = getPlayerName();
-    this.player.skillId = getSelectedSkillId();
     this.snakes.push(this.player);
 
     for (let i = 0; i < aiCount; i++) {
@@ -778,31 +699,20 @@ class Game {
       if (anyNear) this.audio.playNearSnake();
     }
 
-    // Baseline magnet — small always-on pull, independent of the Magnet
-    // power-up. Runs every frame regardless of magnetTimer so it never
-    // stacks with or gets confused for the full power-up radius/aura.
+    // Magnet pull — power-up magnet (strong, timed) takes priority; when
+    // it's not active, the player's permanent passive magnet (weak, always
+    // on) still gently pulls in food that's already very close.
     if (this.player.alive) {
-      this.foodGrid.query(this.player.head.x, this.player.head.y, BASELINE_MAGNET_RADIUS, this._foodQueryBuf);
-      for (const food of this._foodQueryBuf) {
-        if (food.type !== FOOD_TYPE.NORMAL) continue;
-        const dx = this.player.head.x - food.pos.x, dy = this.player.head.y - food.pos.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const strength = (1 - dist / BASELINE_MAGNET_RADIUS) * BASELINE_MAGNET_PULL_FORCE * dt;
-        this.foodGrid.remove(food);
-        food.pos.x += (dx / dist) * strength;
-        food.pos.y += (dy / dist) * strength;
-        this.foodGrid.add(food);
-      }
-    }
+      const usingPowerup = this.player.magnetTimer > 0;
+      const radius = usingPowerup ? MAGNET_RADIUS : PASSIVE_MAGNET_RADIUS;
+      const pullForce = usingPowerup ? MAGNET_PULL_FORCE : PASSIVE_MAGNET_FORCE;
 
-    // Magnet pull (power-up — full radius/force, separate from baseline)
-    if (this.player.alive && this.player.magnetTimer > 0) {
-      this.foodGrid.query(this.player.head.x, this.player.head.y, MAGNET_RADIUS, this._foodQueryBuf);
+      this.foodGrid.query(this.player.head.x, this.player.head.y, radius, this._foodQueryBuf);
       for (const food of this._foodQueryBuf) {
         if (food.type !== FOOD_TYPE.NORMAL) continue;
         const dx = this.player.head.x - food.pos.x, dy = this.player.head.y - food.pos.y;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const strength = (1 - dist / MAGNET_RADIUS) * MAGNET_PULL_FORCE * dt;
+        const strength = (1 - dist / radius) * pullForce * dt;
         this.foodGrid.remove(food);
         food.pos.x += (dx / dist) * strength;
         food.pos.y += (dy / dist) * strength;
@@ -1020,22 +930,6 @@ class Game {
     if (hudLives) hudLives.style.visibility = this._mode === 'timetrial' ? 'hidden' : '';
   }
 
-  /* ── SKILLS ─────────────────────────────────────────────── */
-  _tryTriggerSkill() {
-    if (!this.player || !this.player.alive) return false;
-    const fired = this.player.triggerSkill();
-    if (!fired) return false;
-
-    const def = SKILLS[this.player.skillId];
-    // Lightweight feedback so the activation reads clearly, reusing
-    // existing juice systems (no new particle/audio plumbing needed).
-    this.particles.burstAt(this.player.head.x, this.player.head.y, '#7effb2', 18);
-    this.shake.trigger(3, 0.12);
-    this.audio.playMagnet(); // generic "power activated" chime
-    if (def) this.killFeed.add(`${def.icon} ${def.name} activated!`);
-    return true;
-  }
-
   /* ── PAUSE / RESUME / RESTART / EXIT ────────────────────── */
   pauseGame() {
     if (!this.running || this.paused) return;
@@ -1104,8 +998,6 @@ class Game {
     p.magnetTimer = 0; p.attackTimer = 0; p.shieldTimer = 0;
     p.ghostTimer  = 0; p.mineTimer   = 0; p.speedBoostTimer = 0;
     p.iFrameTimer = IFRAME_DURATION;
-    p.skillActiveTimer = 0;
-    p._skillSpeedActive = false; p._skillGhostActive = false; p._skillShieldActive = false;
     this.audio.playLifeline();
   }
 
@@ -1115,14 +1007,9 @@ class Game {
 
     if (snake === this.player) {
       if (this.player.invincible) {
-        // Shield breaks (either the food power-up or the Iron Scale skill)
+        // Shield breaks
         if (this.player.shieldTimer > 0) {
           this.player.shieldTimer = 0;
-          this.shake.trigger(4, 0.2);
-        }
-        if (this.player._skillShieldActive) {
-          this.player._skillShieldActive = false;
-          this.player.skillActiveTimer   = 0;
           this.shake.trigger(4, 0.2);
         }
         return;
