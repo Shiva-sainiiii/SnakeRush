@@ -539,7 +539,7 @@ const AI_COUNT      = _IS_MOBILE ? 9   : 14;
 const SEGMENT_GAP   = 8;
 const SEGMENT_R_BASE = 9;
 const BASE_SPEED    = 130;
-const BOOST_SPEED   = 220;
+const BOOST_SPEED   = 400;
 const BOOST_DRAIN   = 0.6;
 const SELF_SKIP     = 8;
 
