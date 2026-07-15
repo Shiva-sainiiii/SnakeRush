@@ -841,7 +841,17 @@ class AISnake extends Snake {
     this._hyst = { PURSUE: 0, FLEE: 0, AVOID: 0, SEEK_FOOD: 0 };
     this._fleeTarget = null; this._pursueTarget = null; this._avoidNormal = null;
     this._nearby = []; this._nearbySnakes = [];
+
+    // AI snakes can now pick up ATTACK food just like the player and get
+    // the same temporary bite ability — see activateAttack(). This doesn't
+    // touch any of the sensing/steering above, so personality, smartness
+    // and defensive behavior (flee/avoid/wall/body danger) are unaffected;
+    // it only adds an extra thing that can happen when they collide head
+    // to body while this timer is active.
+    this.attackTimer = 0;
   }
+
+  activateAttack() { this.attackTimer = ATTACK_DURATION; }
 
   _applyPersonality(speciesSpeedMul = 1) {
     switch (this.personality) {
@@ -899,6 +909,7 @@ class AISnake extends Snake {
 
   update(dt) {
     if (!this.alive) return;
+    if (this.attackTimer > 0) this.attackTimer = Math.max(0, this.attackTimer - dt);
     const { nearbyFood, fleeTarget, pursueTarget, avoidNormal } = this._sense();
     this.state = this._evalFSM(dt, nearbyFood, fleeTarget, pursueTarget, avoidNormal);
 
