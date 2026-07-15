@@ -525,8 +525,15 @@ class Mine {
 const _IS_MOBILE = (('ontouchstart' in window) || navigator.maxTouchPoints > 0)
                     && Math.min(window.innerWidth, window.innerHeight) < 900;
 
-const WORLD_W       = 5500;
-const WORLD_H       = 5500;
+// World doubled (5500 -> 11000): at 5-6k length the AI roster also grows
+// huge, and with everyone crammed into the old 5500x5500 map the per-frame
+// O(nearby snakes) collision buckets and body-segment checks all had way
+// more overlapping candidates to test, which is what caused the lag.
+// Doubling the map spreads the same snake/food population over 4x the
+// area, cutting local density (and therefore collision-check load) without
+// changing any gameplay rules.
+const WORLD_W       = 11000;
+const WORLD_H       = 11000;
 const FOOD_COUNT    = _IS_MOBILE ? 380 : 620;
 const AI_COUNT      = _IS_MOBILE ? 9   : 14;
 const SEGMENT_GAP   = 8;
@@ -563,9 +570,9 @@ const MAGNET_PULL_FORCE  = 220;
 // still technically being pulled. PASSIVE_MAGNET_MIN_STRENGTH sets a floor
 // so pull is meaningful across the whole radius, not just right next to
 // the head.
-const PASSIVE_MAGNET_RADIUS       = 70;
-const PASSIVE_MAGNET_FORCE        = 300;
-const PASSIVE_MAGNET_MIN_STRENGTH = 0.45; // floor as a fraction of full falloff (0..1)
+const PASSIVE_MAGNET_RADIUS       = 45;   // was 70 — tighter pull zone
+const PASSIVE_MAGNET_FORCE        = 480;  // was 300 — pulls harder within that zone
+const PASSIVE_MAGNET_MIN_STRENGTH = 0.6;  // was 0.45 — floor raised so the stronger pull stays felt at the radius edge too
 
 const ATTACK_DURATION    = 8;
 const SHIELD_DURATION    = 4;
@@ -579,6 +586,10 @@ const MINE_TRIGGER_R     = 60;
 const MINE_KILL_R        = 80;
 
 const POWERUP_SPAWN_RATE     = 0.004;
+// ATTACK (red) food used to share POWERUP_SPAWN_RATE with magnet. Split
+// into its own rate and raised — needed more often to fight/defend against
+// the huge snakes that show up once lengths climb into the thousands.
+const ATTACK_SPAWN_RATE      = 0.009;
 const LIFELINE_SPAWN_RATE    = 0.002;
 const SHIELD_SPAWN_RATE      = 0.003;
 const GHOST_SPAWN_RATE       = 0.003;
