@@ -570,10 +570,9 @@ const MAGNET_PULL_FORCE  = 220;
 // still technically being pulled. PASSIVE_MAGNET_MIN_STRENGTH sets a floor
 // so pull is meaningful across the whole radius, not just right next to
 // the head.
-const PASSIVE_MAGNET_RADIUS       = 5;   // was 70 — tighter pull zone
-const PASSIVE_MAGNET_FORCE        = 100;  // was 300 — pulls harder within that zone
-const PASSIVE_MAGNET_MIN_STRENGTH = 0.45;  // was 0.45 — floor raised so the stronger pull stays felt at the radius edge too
-
+const PASSIVE_MAGNET_RADIUS       = 30;   // tight but actually functional (> eat radius)
+const PASSIVE_MAGNET_FORCE        = 400;
+const PASSIVE_MAGNET_MIN_STRENGTH = 0.7;
 const ATTACK_DURATION    = 8;
 const SHIELD_DURATION    = 4;
 const GHOST_DURATION     = 4;
