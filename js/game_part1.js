@@ -538,8 +538,8 @@ const FOOD_COUNT    = _IS_MOBILE ? 1500 : 2500;
 const AI_COUNT      = _IS_MOBILE ? 9   : 14;
 const SEGMENT_GAP   = 8;
 const SEGMENT_R_BASE = 9;
-const BASE_SPEED    = 200;
-const BOOST_SPEED   = 350;
+const BASE_SPEED    = 190;
+const BOOST_SPEED   = 300;
 const BOOST_DRAIN   = 0.6;
 const SELF_SKIP     = 8;
 
