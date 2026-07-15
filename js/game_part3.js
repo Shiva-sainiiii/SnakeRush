@@ -545,18 +545,22 @@ class Game {
       const daily = DailyChallenge.isActive ? DailyChallenge.enabledPowerups : null;
       const ok = (name) => !daily || daily.includes(name);
 
-      if      (roll < LIFELINE_SPAWN_RATE && this._lifelineCount < LIFELINE_MAX_ON_MAP && ok('lifeline'))    type = FOOD_TYPE.LIFELINE;
-      else if (roll < LIFELINE_SPAWN_RATE + POWERUP_SPAWN_RATE && ok('magnet'))                              type = FOOD_TYPE.MAGNET;
-      else if (roll < LIFELINE_SPAWN_RATE + POWERUP_SPAWN_RATE * 2 && ok('attack'))                          type = FOOD_TYPE.ATTACK;
-      else if (roll < LIFELINE_SPAWN_RATE + POWERUP_SPAWN_RATE * 2 + SHIELD_SPAWN_RATE
-               && this._shieldCount < SHIELD_MAX_ON_MAP && ok('shield'))                                     type = FOOD_TYPE.SHIELD;
-      else if (roll < LIFELINE_SPAWN_RATE + POWERUP_SPAWN_RATE * 2 + SHIELD_SPAWN_RATE + GHOST_SPAWN_RATE
-               && this._ghostCount < GHOST_MAX_ON_MAP && ok('ghost'))                                        type = FOOD_TYPE.GHOST;
-      else if (roll < LIFELINE_SPAWN_RATE + POWERUP_SPAWN_RATE * 2 + SHIELD_SPAWN_RATE + GHOST_SPAWN_RATE + MINE_SPAWN_RATE
-               && this._mineCount < MINE_MAX_ON_MAP && ok('mine'))                                           type = FOOD_TYPE.MINE;
-      else if (roll < LIFELINE_SPAWN_RATE + POWERUP_SPAWN_RATE * 2 + SHIELD_SPAWN_RATE + GHOST_SPAWN_RATE + MINE_SPAWN_RATE + SPEED_SPAWN_RATE
-               && this._speedCount < SPEED_MAX_ON_MAP && ok('speed'))                                        type = FOOD_TYPE.SPEED;
-      else                                                                                                    type = FOOD_TYPE.NORMAL;
+      const afterLifeline = LIFELINE_SPAWN_RATE;
+      const afterMagnet   = afterLifeline + POWERUP_SPAWN_RATE;
+      const afterAttack   = afterMagnet   + ATTACK_SPAWN_RATE;
+      const afterShield   = afterAttack   + SHIELD_SPAWN_RATE;
+      const afterGhost    = afterShield   + GHOST_SPAWN_RATE;
+      const afterMine     = afterGhost    + MINE_SPAWN_RATE;
+      const afterSpeed    = afterMine     + SPEED_SPAWN_RATE;
+
+      if      (roll < afterLifeline && this._lifelineCount < LIFELINE_MAX_ON_MAP && ok('lifeline'))    type = FOOD_TYPE.LIFELINE;
+      else if (roll < afterMagnet && ok('magnet'))                                                     type = FOOD_TYPE.MAGNET;
+      else if (roll < afterAttack && ok('attack'))                                                     type = FOOD_TYPE.ATTACK;
+      else if (roll < afterShield && this._shieldCount < SHIELD_MAX_ON_MAP && ok('shield'))            type = FOOD_TYPE.SHIELD;
+      else if (roll < afterGhost && this._ghostCount < GHOST_MAX_ON_MAP && ok('ghost'))                type = FOOD_TYPE.GHOST;
+      else if (roll < afterMine && this._mineCount < MINE_MAX_ON_MAP && ok('mine'))                    type = FOOD_TYPE.MINE;
+      else if (roll < afterSpeed && this._speedCount < SPEED_MAX_ON_MAP && ok('speed'))                type = FOOD_TYPE.SPEED;
+      else                                                                                              type = FOOD_TYPE.NORMAL;
     }
 
     const f = new Food(fx, fy, col, type);
@@ -818,7 +822,18 @@ class Game {
             }
             continue;
           }
+        } else if (food.type === FOOD_TYPE.ATTACK) {
+          // AI snakes can now use ATTACK food too — gives them the same
+          // temporary bite ability the player gets. Everything else about
+          // the snake (personality, sensing, flee/avoid/wall defense)
+          // stays exactly as-is; this only grants the extra offensive
+          // option that _checkSnakeCollisions() now honors for any
+          // attacking snake, not just the player.
+          snake.activateAttack();
+          eaten.push(food); this._spawnFood(FOOD_TYPE.NORMAL); continue;
         }
+        // Other power-up types eaten by AI fall through to the generic
+        // eat() below, same as before this change (unchanged behavior).
 
         const comboMul = isPlayer ? this.combo.multiplier : 1;
         const mult = (1 + Math.floor(snake.length / 20)) * comboMul;
@@ -1128,8 +1143,6 @@ class Game {
     const headBuckets   = this._headBuckets;
     for (const arr of headBuckets.values()) arr.length = 0;
 
-    const playerInAttack = this.player.alive && this.player.attackTimer > 0;
-
     const BUCKET_SIZE = 1100;
     // Pack (bx,by) into a single integer key instead of a template string —
     // avoids string allocation for every snake x every neighboring cell.
@@ -1137,7 +1150,7 @@ class Game {
     // to signed 32-bit ints, and shifting a large offset left by 16 can
     // silently overflow/flip sign. Multiplication keys stay exact in
     // float64 for all values used here.
-    const BUCKET_OFFSET = 64; // world is 5500x5500 / 1100 = 5 buckets per axis; ±1 neighbor search needs a small safe margin
+    const BUCKET_OFFSET = 64; // world is 11000x11000 / 1100 = 10 buckets per axis; ±1 neighbor search needs a small safe margin
     const BUCKET_MOD    = 100000;
     for (let a = 0; a < this.snakes.length; a++) {
       const sa = this.snakes[a];
@@ -1204,15 +1217,22 @@ class Game {
           continue;
         }
 
-        // Head-vs-body (sa → sb): hit radius uses sb's body thickness
+        // Head-vs-body (sa → sb): hit radius uses sb's body thickness.
+        // Attack is now generalized: whichever snake has an active
+        // attackTimer shatters the body it hits, regardless of whether
+        // that's the player or an AI. Player-specific protections (ghost
+        // pass-through, invincibility) are unchanged.
+        const saInAttack = sa.attackTimer > 0;
+        const sbInAttack = sb.attackTimer > 0;
         const killDsqB = (getSegmentR(sb.isPlayer ? true : sb) * 1.8) ** 2;
         for (let s = 1; s < sb.segments.length; s++) {
           if (Vector2.distSq(sa.head, sb.segments[s]) >= killDsqB) continue;
           // Ghost: skip body collision
           if (sa === this.player && this.player.isGhost) break;
-          if (sa === this.player && playerInAttack && sb !== this.player) {
-            shatterList.push({ snake: sb, fromIndex: s });
-          } else if (sb === this.player && sa !== this.player && !this.player.invincible) {
+          if (sb === this.player && this.player.invincible) break;
+          if (saInAttack) {
+            shatterList.push({ snake: sb, fromIndex: s, byPlayer: sa === this.player });
+          } else if (sb === this.player && sa !== this.player) {
             this.audio.playEnemyBite();
             killSet.add(sa);
           } else {
@@ -1226,9 +1246,10 @@ class Game {
         for (let s = 1; s < sa.segments.length; s++) {
           if (Vector2.distSq(sb.head, sa.segments[s]) >= killDsqA) continue;
           if (sb === this.player && this.player.isGhost) break;
-          if (sb === this.player && playerInAttack && sa !== this.player) {
-            shatterList.push({ snake: sa, fromIndex: s });
-          } else if (sa === this.player && sb !== this.player && !this.player.invincible) {
+          if (sa === this.player && this.player.invincible) break;
+          if (sbInAttack) {
+            shatterList.push({ snake: sa, fromIndex: s, byPlayer: sb === this.player });
+          } else if (sa === this.player && sb !== this.player) {
             this.audio.playEnemyBite();
             killSet.add(sb);
           } else {
@@ -1242,11 +1263,11 @@ class Game {
     for (const s of killSet) this._killSnake(s, playerKillSet.has(s));
 
     const W = this._worldW, H = this._worldH;
-    for (const { snake, fromIndex } of shatterList) {
+    for (const { snake, fromIndex, byPlayer } of shatterList) {
       if (!snake.alive) continue;
       const MIN_SURVIVE = 5;
       if (fromIndex <= MIN_SURVIVE) {
-        this._killSnake(snake, true); continue;
+        this._killSnake(snake, !!byPlayer); continue;
       }
       const severed = snake.segments.splice(fromIndex);
       this.particles.burst(severed, snake.headColor);
