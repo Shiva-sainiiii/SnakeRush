@@ -571,8 +571,8 @@ const MAGNET_PULL_FORCE  = 220;
 // so pull is meaningful across the whole radius, not just right next to
 // the head.
 const PASSIVE_MAGNET_RADIUS       = 5;   // was 70 — tighter pull zone
-const PASSIVE_MAGNET_FORCE        = 200;  // was 300 — pulls harder within that zone
-const PASSIVE_MAGNET_MIN_STRENGTH = 1;  // was 0.45 — floor raised so the stronger pull stays felt at the radius edge too
+const PASSIVE_MAGNET_FORCE        = 500;  // was 300 — pulls harder within that zone
+const PASSIVE_MAGNET_MIN_STRENGTH = 0.45;  // was 0.45 — floor raised so the stronger pull stays felt at the radius edge too
 
 const ATTACK_DURATION    = 8;
 const SHIELD_DURATION    = 4;
