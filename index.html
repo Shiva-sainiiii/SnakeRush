@@ -68,6 +68,18 @@
 </head>
 <body>
 
+  <script>
+    // Nudge mobile Chrome to collapse its address bar on load. Without an
+    // actual page-level scroll (our overlay/canvas are position:fixed and
+    // scroll internally), Chrome has no signal to auto-hide the bar, so we
+    // fake a 1px scroll after layout settles.
+    function _hideAddressBar() {
+      window.scrollTo(0, 1);
+    }
+    window.addEventListener('load', () => setTimeout(_hideAddressBar, 50));
+    window.addEventListener('orientationchange', () => setTimeout(_hideAddressBar, 200));
+  </script>
+
   <!-- Start / Game-Over overlay -->
   <div id="overlay">
     <div id="overlay-scroll">
@@ -80,7 +92,7 @@
 
         <div id="daily-badge" class="daily-badge hidden">📅 DAILY CHALLENGE</div>
 
-        <h1 id="overlay-title">SNAKE RUSH</h1>
+        <h1 id="overlay-title">🐍 SNAKE RUSH</h1>
         <p id="overlay-byline">by Shiva Saini</p>
         <p id="overlay-subtitle">Eat food. Grow big. Outlast the rest.</p>
 
