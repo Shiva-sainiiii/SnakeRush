@@ -88,11 +88,36 @@ class Game {
     this._setupPlayerName();
     this._setupStats();
     this._updateAchievementCount();
-    this.startBtn.addEventListener('click', () => this.startGame());
+    this.startBtn.addEventListener('click', () => { this._requestFullscreen(); this.startGame(); });
     window._game = this;
 
     // Show daily badge if applicable
     this._checkDaily();
+  }
+
+  /* ── FULLSCREEN — hide the browser chrome (address bar / status
+     bar) while playing. Must be called directly inside a user-gesture
+     handler (click/tap) or browsers will silently reject it. Falls
+     back through vendor-prefixed APIs for older mobile browsers, and
+     no-ops quietly if fullscreen isn't supported/allowed at all. ── */
+  _requestFullscreen() {
+    const el = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen ||
+                el.mozRequestFullScreen || el.msRequestFullscreen;
+    if (req) {
+      try { req.call(el); } catch (e) { /* ignore — not fatal */ }
+    }
+  }
+
+  _exitFullscreen() {
+    const isFs = document.fullscreenElement || document.webkitFullscreenElement ||
+                 document.mozFullScreenElement || document.msFullscreenElement;
+    if (!isFs) return;
+    const exit = document.exitFullscreen || document.webkitExitFullscreen ||
+                 document.mozCancelFullScreen || document.msExitFullscreen;
+    if (exit) {
+      try { exit.call(document); } catch (e) { /* ignore */ }
+    }
   }
 
   /* ── DAILY CHALLENGE ────────────────────────────────────── */
@@ -997,6 +1022,7 @@ class Game {
     this._inDangerZone = false;
     if (this._rafId) cancelAnimationFrame(this._rafId);
     this.audio.stopBg(); this.audio.stopPanic(); this.audio.stopRun();
+    this._exitFullscreen();
 
     this.scoreDisplay.style.display = 'none';
     const bestDisplay = document.getElementById('best-score-display');
