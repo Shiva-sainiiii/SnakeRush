@@ -268,6 +268,7 @@ html, body {
 
 /* ── HERO — title / byline / nickname / play, always first ─── */
 #hero-block {
+  position: relative;
   width: 100%;
   min-height: calc(100svh - 48px);
   display: flex;
@@ -277,6 +278,36 @@ html, body {
   gap: 14px;
   text-align: center;
 }
+
+/* Top-corner icon buttons — gear (settings) top-left, speaker top-right */
+#settings-gear-btn,
+.icon-btn {
+  position: absolute;
+  top: 4px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.1s ease;
+}
+
+#settings-gear-btn { left: 4px; }
+.icon-btn           { right: 4px; }
+
+#settings-gear-btn:hover,
+.icon-btn:hover { border-color: var(--green-dim); }
+
+#settings-gear-btn:active,
+.icon-btn:active { transform: scale(0.92); }
+
+.icon-btn.active { border-color: var(--green); }
 
 #overlay-title {
   font-size: clamp(2.6rem, 11vw, 4.6rem);
@@ -582,9 +613,32 @@ html, body {
   color: var(--amber);
 }
 
+/* ── Settings Modal — centered overlay, opened via gear icon ─── */
+#settings-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+#settings-modal.hidden { display: none; }
+
+#settings-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.82);
+}
+
 /* ── Settings Panel ──────────────────────────────────────────── */
 #settings-panel {
+  position: relative;
   width: 100%;
+  max-width: 400px;
+  max-height: 85svh;
+  overflow-y: auto;
   background: var(--panel);
   border: 2px solid var(--line);
   border-radius: 16px;
@@ -608,6 +662,23 @@ html, body {
 }
 
 .settings-icon { font-size: 0.9rem; }
+
+#settings-close-btn {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#settings-close-btn:hover { color: var(--text); }
 
 .setting-row {
   display: flex;
