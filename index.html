@@ -74,6 +74,10 @@
 
       <!-- ══ HERO — name, byline, nickname, play — always the first thing seen ══ -->
       <div id="hero-block">
+        <!-- Top-corner icon controls: settings (gear) + sound toggle -->
+        <button id="settings-gear-btn" aria-label="Open settings" title="Settings">⚙️</button>
+        <button id="setting-mute" class="icon-btn active" aria-pressed="false" aria-label="Toggle sound" title="Sound">🔊</button>
+
         <div id="daily-badge" class="daily-badge hidden">📅 DAILY CHALLENGE</div>
 
         <h1 id="overlay-title">SNAKE RUSH</h1>
@@ -145,46 +149,44 @@
       </div>
       <!-- ══ /feature card ══ -->
 
-      <!-- ── Settings Panel ───────────────────────────────── -->
-      <div id="settings-panel">
-        <div class="settings-header">
-          <span class="settings-icon">⚙️</span>
-          <span>Settings</span>
-        </div>
+    </div>
+  </div>
 
-        <!-- Sound toggle -->
-        <div class="setting-row">
-          <label class="setting-label" for="setting-mute">🔊 Sound</label>
-          <button id="setting-mute" class="toggle-btn active" aria-pressed="false">ON</button>
-        </div>
+  <!-- ══ Settings Modal — opened via the gear icon on the hero screen ══ -->
+  <div id="settings-modal" class="hidden">
+    <div id="settings-modal-backdrop"></div>
+    <div id="settings-panel" role="dialog" aria-label="Settings">
+      <div class="settings-header">
+        <span class="settings-icon">⚙️</span>
+        <span>Settings</span>
+        <button id="settings-close-btn" aria-label="Close settings">✕</button>
+      </div>
 
-        <!-- Gyro toggle -->
-        <div class="setting-row" id="gyro-row" style="display:none;">
-          <label class="setting-label" for="setting-gyro">🎮 Gyro Steer</label>
-          <button id="setting-gyro" class="toggle-btn" aria-pressed="false">OFF</button>
-        </div>
+      <!-- Gyro toggle -->
+      <div class="setting-row" id="gyro-row" style="display:none;">
+        <label class="setting-label" for="setting-gyro">🎮 Gyro Steer</label>
+        <button id="setting-gyro" class="toggle-btn" aria-pressed="false">OFF</button>
+      </div>
 
-        <!-- Sensitivity slider -->
-        <div class="setting-row">
-          <label class="setting-label" for="setting-sensitivity">🎮 Sensitivity</label>
-          <div class="slider-wrap">
-            <input type="range" id="setting-sensitivity" min="1" max="20" step="1" value="8" />
-            <span id="sensitivity-val">8</span>
-          </div>
-        </div>
-
-        <!-- Snake design selector -->
-        <div class="setting-row setting-row--vertical">
-          <label class="setting-label">🎨 Snake Style</label>
-          <div class="design-btns" id="design-selector" role="group" aria-label="Snake style">
-            <button class="design-btn active" data-design="multicolour">Multicolour</button>
-            <button class="design-btn" data-design="fatty">Fatty</button>
-            <button class="design-btn" data-design="thin">Thin</button>
-            <button class="design-btn" data-design="designer">Designer</button>
-          </div>
+      <!-- Sensitivity slider -->
+      <div class="setting-row">
+        <label class="setting-label" for="setting-sensitivity">🎮 Sensitivity</label>
+        <div class="slider-wrap">
+          <input type="range" id="setting-sensitivity" min="1" max="20" step="1" value="8" />
+          <span id="sensitivity-val">8</span>
         </div>
       </div>
-      <!-- ── /Settings Panel ──────────────────────────────── -->
+
+      <!-- Snake design selector -->
+      <div class="setting-row setting-row--vertical">
+        <label class="setting-label">🎨 Snake Style</label>
+        <div class="design-btns" id="design-selector" role="group" aria-label="Snake style">
+          <button class="design-btn active" data-design="multicolour">Multicolour</button>
+          <button class="design-btn" data-design="fatty">Fatty</button>
+          <button class="design-btn" data-design="thin">Thin</button>
+          <button class="design-btn" data-design="designer">Designer</button>
+        </div>
+      </div>
 
       <!-- ── Stats Panel ──────────────────────────────────── -->
       <div id="stats-panel">
@@ -203,9 +205,9 @@
         </div>
       </div>
       <!-- ── /Stats Panel ─────────────────────────────────── -->
-
     </div>
   </div>
+  <!-- ══ /Settings Modal ══ -->
 
   <!-- HUD: score + length + lives + power-ups + boost indicator -->
   <div id="hud">
@@ -244,6 +246,28 @@
   <script src="js/game_part3.js"></script>
   <script src="js/game_part4.js"></script>
   <script src="js/game_part5.js"></script>
+
+  <!-- Settings modal open/close — gear icon on hero opens it as a
+       centered overlay; tapping the backdrop or the ✕ closes it. -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const gearBtn  = document.getElementById('settings-gear-btn');
+      const modal    = document.getElementById('settings-modal');
+      const backdrop = document.getElementById('settings-modal-backdrop');
+      const closeBtn = document.getElementById('settings-close-btn');
+      if (!gearBtn || !modal) return;
+
+      const open  = () => modal.classList.remove('hidden');
+      const close = () => modal.classList.add('hidden');
+
+      gearBtn.addEventListener('click', open);
+      if (backdrop) backdrop.addEventListener('click', close);
+      if (closeBtn) closeBtn.addEventListener('click', close);
+      document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) close();
+      });
+    });
+  </script>
 
   <!-- Rotating instruction cards on the start screen: one card visible
        at a time, auto-advancing, with dot indicators. Pauses while the
