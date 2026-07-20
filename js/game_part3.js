@@ -376,11 +376,12 @@ class Game {
 
   /* ── SETTINGS UI ────────────────────────────────────────── */
   _setupSettings() {
-    // Mute toggle
+    // Mute toggle — now a top-corner icon button on the hero screen;
+    // shows a speaker icon rather than ON/OFF text.
     const muteBtn = document.getElementById('setting-mute');
     muteBtn.addEventListener('click', () => {
       Settings.muted = !Settings.muted;
-      muteBtn.textContent = Settings.muted ? 'OFF' : 'ON';
+      muteBtn.textContent = Settings.muted ? '🔇' : '🔊';
       muteBtn.classList.toggle('active', !Settings.muted);
       muteBtn.setAttribute('aria-pressed', String(Settings.muted));
       this.audio.applyMuteSetting();
