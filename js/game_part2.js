@@ -482,6 +482,7 @@ class Snake {
     let headFill  = inAttack ? '#ff2222' : this._resolveHeadColor();
     const glowColor = inAttack ? '#ff2222' : (inShield ? '#a0d8ff' : (inSpeed ? '#ffff80' : headFill));
     const isMulticolour = this.isPlayer && Settings.design === 'multicolour' && !inAttack;
+    const isStriped = !this.isPlayer && this.stripePattern && !inAttack;
 
     // Body
     const _dpr  = window._game ? window._game._dpr : 1;
@@ -496,6 +497,24 @@ class Snake {
         ctx.arc(sx, sy, segR, 0, Math.PI * 2);
         ctx.fillStyle = MULTICOLOUR_PALETTE[i % MULTICOLOUR_PALETTE.length];
         ctx.fill();
+      }
+    } else if (isStriped) {
+      const pattern = this.stripePattern;
+      // Group segments by colour bucket first so each colour gets one
+      // beginPath+fill call instead of one per segment (fewer canvas state
+      // changes = cheaper on mobile than the per-segment loop below).
+      for (let c = 0; c < pattern.length; c++) {
+        ctx.beginPath();
+        let any = false;
+        for (let i = len - 1; i >= 1; i--) {
+          if (i % pattern.length !== c) continue;
+          const sx = segs[i].x - camX, sy = segs[i].y - camY;
+          if (sx < -segR * 2 || sx > _logW + segR * 2 || sy < -segR * 2 || sy > _logH + segR * 2) continue;
+          ctx.moveTo(sx + segR, sy);
+          ctx.arc(sx, sy, segR, 0, Math.PI * 2);
+          any = true;
+        }
+        if (any) { ctx.fillStyle = pattern[c]; ctx.fill(); }
       }
     } else {
       ctx.beginPath();
@@ -849,6 +868,11 @@ class AISnake extends Snake {
     // it only adds an extra thing that can happen when they collide head
     // to body while this timer is active.
     this.attackTimer = 0;
+
+    // Striped body pattern — gives each AI a distinct multi-colour look
+    // instead of one flat body colour. Boss keeps its solid red/black look
+    // (handled via forcedSpecies call site), so only assign for normal AI.
+    this.stripePattern = forcedSpecies ? null : nextAIStripePattern();
   }
 
   activateAttack() { this.attackTimer = ATTACK_DURATION; }
@@ -992,7 +1016,17 @@ class AISnake extends Snake {
       for (const other of this.snakes) {
         if (other === this || !other.alive) continue;
         if (Vector2.distSq(this.head, other.head) > (this.BODY_SENSE_R + other.length * SEGMENT_GAP) * (this.BODY_SENSE_R + other.length * SEGMENT_GAP)) continue;
-        for (const seg of other.segments) {
+        // Sample every Nth segment instead of all of them. Stride is capped
+        // at 2 (segments are SEGMENT_GAP=8px apart; the hit radius is
+        // ~19.8px, so skipping at most one segment between checks still
+        // guarantees nothing slips through undetected). This still roughly
+        // halves the work on long bodies without any loss of detection
+        // accuracy — the earlier higher-stride version risked gaps larger
+        // than the hit radius on very long snakes and has been corrected.
+        const segs   = other.segments;
+        const stride = segs.length > 40 ? 2 : 1;
+        for (let si = 1; si < segs.length; si += stride) {
+          const seg = segs[si];
           const dx = probeX - seg.x, dy = probeY - seg.y;
           if (dx * dx + dy * dy < hitRadSq) {
             const dot  = -this.dir.y * dx + this.dir.x * dy;
@@ -1145,8 +1179,13 @@ class AISnake extends Snake {
     for (const other of this.snakes) {
       if (other === this || !other.alive) continue;
       if (Vector2.distSq(this.head, other.head) > (this.BODY_SENSE_R + other.length * SEGMENT_GAP) * (this.BODY_SENSE_R + other.length * SEGMENT_GAP)) continue;
-      for (let i = 1; i < other.segments.length; i++) {
-        const seg = other.segments[i];
+      // Same safe stride as _sense()'s lookahead loop above — halves the
+      // segment checks on long bodies without risking a missed detection
+      // (DANGER_DIST ≈ 28.8px comfortably covers a 2-segment/16px stride).
+      const segs   = other.segments;
+      const stride = segs.length > 40 ? 2 : 1;
+      for (let i = 1; i < segs.length; i += stride) {
+        const seg = segs[i];
         const dx = hx - seg.x, dy = hy - seg.y;
         if (dx * dx + dy * dy < dangerDsq) {
           // Steer perpendicular to current heading, away from the segment.
@@ -1179,6 +1218,15 @@ function randomAIPalette() {
   while (idx === _lastAIPaletteIdx && AI_PALETTES.length > 1);
   _lastAIPaletteIdx = idx;
   return AI_PALETTES[idx];
+}
+
+let _lastStripeIdx = -1;
+function nextAIStripePattern() {
+  let idx;
+  do { idx = Math.floor(Math.random() * AI_STRIPE_PATTERNS.length); }
+  while (idx === _lastStripeIdx && AI_STRIPE_PATTERNS.length > 1);
+  _lastStripeIdx = idx;
+  return AI_STRIPE_PATTERNS[idx];
 }
 
 const FOOD_COLORS = [

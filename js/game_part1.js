@@ -620,6 +620,24 @@ const MULTICOLOUR_PALETTE = [
   '#00d2ff','#8c52ff','#ff52c0','#52ffca',
 ];
 
+/* AI striped body patterns — each is a repeating colour sequence applied
+   segment-by-segment (like the player's multicolour design), giving each
+   AI snake a distinct visual identity instead of one flat body colour.
+   Head colour is picked separately per-snake (see randomAIPalette) so the
+   head still reads clearly against the striped body. */
+const AI_STRIPE_PATTERNS = [
+  ['#ff3b3b', '#ffd23b'],                         // red / yellow
+  ['#ffd23b', '#3ba6ff', '#3bffa0'],               // yellow / blue / green
+  ['#ff3ba0', '#3b3bff'],                          // pink / blue
+  ['#3bffcf', '#ff8a3b'],                          // teal / orange
+  ['#b23bff', '#3bff5e'],                          // purple / green
+  ['#ff3b3b', '#ffffff'],                          // red / white
+  ['#3bd6ff', '#ffe23b', '#ff3b7a'],                // cyan / yellow / pink
+  ['#7cff3b', '#3b5eff', '#ff3b3b'],                // green / blue / red
+  ['#ff9a3b', '#3bffdd'],                          // amber / aqua
+  ['#ff3bd6', '#3bff8a', '#ffe23b'],                // magenta / green / yellow
+];
+
 /* Biome definitions (3x3 grid) */
 const BIOMES = [
   { name: 'Void',      color: 'rgba(0,0,0,0.04)' },
