@@ -288,14 +288,17 @@ body::after {
   justify-content: center;
   gap: 12px;
   text-align: center;
-  padding-top: 54px; /* clears the icon buttons pinned to the top corners */
+  padding-top: 8px;
 }
 
-/* Top-corner icon buttons — gear (settings) top-left, speaker top-right */
+/* Top-corner icon buttons — gear (settings) top-left, speaker top-right.
+   Fixed to the viewport corners so they stay put regardless of scroll
+   position inside #overlay (previously absolute to #hero-block, which
+   is vertically centered and made them drift toward the middle). */
 #settings-gear-btn,
 .icon-btn {
-  position: absolute;
-  top: 0;
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
   width: 44px;
   height: 44px;
   border-radius: 50%;
@@ -308,10 +311,11 @@ body::after {
   justify-content: center;
   cursor: pointer;
   transition: border-color 0.15s ease, transform 0.1s ease;
+  z-index: 21;
 }
 
-#settings-gear-btn { left: 0; }
-.icon-btn           { right: 0; }
+#settings-gear-btn { left: max(14px, env(safe-area-inset-left)); }
+.icon-btn           { right: max(14px, env(safe-area-inset-right)); }
 
 #settings-gear-btn:hover,
 .icon-btn:hover { border-color: var(--green-dim); }
@@ -358,7 +362,7 @@ body::after {
   align-items: center;
   justify-content: center;
   width: 100%;
-  max-width: 300px;
+  max-width: 240px;
 }
 
 #player-name-display,
@@ -473,7 +477,8 @@ body::after {
    Cards are stacked absolutely; JS toggles .active to fade/swap
    one at a time. Fixed-height wrapper so nothing jumps. ──────── */
 #hint-carousel {
-  width: 100%;
+  width: 92%;
+  max-width: 380px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -553,6 +558,7 @@ body::after {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  margin-top: 10px;
 }
 
 .feature-card-header {
