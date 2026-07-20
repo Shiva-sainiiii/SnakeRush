@@ -217,80 +217,306 @@ html, body {
   to   { opacity: 1; text-shadow: 0 0 10px rgba(255,60,60,0.8); }
 }
 
-/* ─── Overlay ───────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════
+   OVERLAY — redesigned: solid black background, flat vibrant
+   accent colors (no glassy transparent-green soup), hero
+   (name + nickname + play) always visible first, everything
+   else revealed below without needing a scroll to reach Play.
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  --ink:        #000000;
+  --panel:      #0d0d0d;
+  --panel-2:    #131313;
+  --line:       #262626;
+  --green:      #39ff6a;   /* primary accent — solid, no alpha */
+  --green-dim:  #1f8a42;
+  --amber:      #ffb300;   /* secondary accent */
+  --red:        #ff3b3b;
+  --blue:       #2fb8ff;
+  --purple:     #b06bff;
+  --text:       #f2f2f2;
+  --text-dim:   #9a9a9a;
+}
+
 #overlay {
   position: fixed;
   inset: 0;
   z-index: 20;
   display: flex;
-  /* flex-start (not center) so tall content always starts at the top and
-     scrolls downward — centering here was clipping the top of the panel
-     on mobile because the scroll container's origin sat mid-content. */
   align-items: flex-start;
   justify-content: center;
-  background: rgba(3,7,12,0.88);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: var(--ink);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  /* Respect safe-area so content never hides under notch or home indicator */
   padding:
-    max(24px, calc(env(safe-area-inset-top) + 16px))
-    max(12px, env(safe-area-inset-right))
-    max(24px, calc(env(safe-area-inset-bottom) + 16px))
-    max(12px, env(safe-area-inset-left));
+    max(20px, calc(env(safe-area-inset-top) + 14px))
+    max(14px, env(safe-area-inset-right))
+    max(28px, calc(env(safe-area-inset-bottom) + 16px))
+    max(14px, env(safe-area-inset-left));
 }
 
-#overlay-content {
-  text-align: center;
+#overlay-scroll {
+  width: 100%;
+  max-width: 440px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 18px;
-  padding: 0 20px;
-  width: 100%;
-  max-width: 440px;
-  /* Pulls content to vertical center when it's shorter than the viewport
-     (e.g. desktop), but has zero effect once content overflows and the
-     parent starts scrolling — so nothing gets clipped on mobile. */
+  gap: 22px;
   margin: auto 0;
 }
 
+/* ── HERO — title / byline / nickname / play, always first ─── */
+#hero-block {
+  width: 100%;
+  min-height: calc(100svh - 48px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+}
+
 #overlay-title {
-  font-size: clamp(2.4rem, 8vw, 4.5rem);
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  color: #7effb2;
-  text-shadow:
-    0 0 18px rgba(126,255,178,0.7),
-    0 0 50px rgba(126,255,178,0.3);
+  font-size: clamp(2.6rem, 11vw, 4.6rem);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: var(--green);
+  line-height: 1;
+}
+
+#overlay-byline {
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--amber);
+  margin-top: -4px;
 }
 
 #overlay-subtitle {
-  font-size: clamp(0.85rem, 2.5vw, 1rem);
-  color: rgba(180,230,255,0.65);
-  letter-spacing: 0.04em;
+  font-size: 0.95rem;
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+  margin-bottom: 6px;
 }
 
-/* ── Mode Selector ────────────────────────────────────────── */
-#mode-selector {
+/* Player nickname — solid input bar, slither.io style */
+#player-name-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 300px;
+}
+
+#player-name-display,
+#player-name-input {
+  width: 100%;
+  text-align: center;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+#player-name-display {
+  padding: 14px 20px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+#player-name-display:hover,
+#player-name-display:active {
+  border-color: var(--green);
+}
+
+#player-name-input {
+  padding: 14px 20px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 2px solid var(--green);
+  color: var(--green);
+  outline: none;
+}
+
+/* Play button — solid, punchy, no glow-blur soup */
+#start-btn {
+  margin-top: 6px;
+  padding: 16px 64px;
+  font-size: 1.1rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #000;
+  background: var(--green);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.1s ease, background 0.15s ease;
+}
+
+#start-btn:hover { background: #55ff85; }
+#start-btn:active { transform: scale(0.96); }
+
+/* Score displays (game-over state, still inside hero block) */
+#score-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  background: var(--panel);
+  border: 2px solid var(--line);
+  padding: 14px 40px;
+  border-radius: 14px;
+  margin-top: 4px;
+}
+
+#final-score {
+  font-size: 2.4rem;
+  font-weight: 900;
+  color: var(--green);
+  line-height: 1.1;
+}
+
+#best-score-display {
+  text-align: center;
+}
+
+#best-score-display p:first-child {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--amber);
+  text-transform: uppercase;
+  margin: 0;
+}
+
+#best-score-value {
+  font-size: 2rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  color: var(--amber);
+  margin: 2px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+#overlay-title.victory { color: var(--amber); }
+
+/* Daily challenge badge — solid pill, no pulse-glow soup */
+.daily-badge {
+  padding: 6px 18px;
+  background: var(--amber);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #000;
+}
+
+/* ── Rotating instruction cards ──────────────────────────────
+   Cards are stacked absolutely; JS toggles .active to fade/swap
+   one at a time. Fixed-height wrapper so nothing jumps. ──────── */
+#hint-carousel {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  background: rgba(5,12,20,0.7);
-  border: 1px solid rgba(126,255,178,0.15);
-  border-radius: 12px;
-  padding: 12px 16px;
+  align-items: center;
+  gap: 12px;
 }
 
-.mode-label {
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(126,255,178,0.55);
+.hint-card-track {
+  position: relative;
+  width: 100%;
+  height: 84px;
 }
+
+.hint-card {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.hint-card.active {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  border-color: var(--green-dim);
+}
+
+.hint-icon {
+  font-size: 1.6rem;
+  flex-shrink: 0;
+}
+
+.hint-text {
+  font-size: 0.92rem;
+  color: var(--text);
+  line-height: 1.35;
+  text-align: left;
+}
+
+.hint-text strong {
+  color: var(--green);
+}
+
+.hint-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.hint-dots .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line);
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.hint-dots .dot.active {
+  background: var(--green);
+  transform: scale(1.4);
+}
+
+/* ── Feature card — mode select + power summary chips ───────── */
+#feature-card {
+  width: 100%;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 16px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.feature-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--green);
+}
+
+.feature-card-icon { font-size: 0.9rem; }
 
 .mode-btns {
   display: flex;
@@ -299,168 +525,73 @@ html, body {
 
 .mode-btn {
   flex: 1;
-  padding: 7px 10px;
-  font-size: 0.8rem;
+  padding: 10px 10px;
+  font-size: 0.85rem;
   font-weight: 700;
-  letter-spacing: 0.05em;
-  border-radius: 8px;
-  border: 1px solid rgba(126,255,178,0.2);
-  background: rgba(126,255,178,0.04);
-  color: rgba(160,220,255,0.6);
+  letter-spacing: 0.03em;
+  border-radius: 10px;
+  border: 2px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text-dim);
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 
 .mode-btn:hover {
-  border-color: rgba(126,255,178,0.4);
-  color: rgba(200,255,220,0.85);
+  border-color: var(--green-dim);
 }
 
 .mode-btn.active {
-  background: rgba(126,255,178,0.18);
-  border-color: rgba(126,255,178,0.6);
-  color: #7effb2;
-  text-shadow: 0 0 5px rgba(126,255,178,0.4);
+  background: var(--green);
+  border-color: var(--green);
+  color: #000;
 }
 
 .mode-desc {
-  font-size: 0.75rem;
-  color: rgba(160,200,255,0.55);
+  font-size: 0.78rem;
+  color: var(--text-dim);
   line-height: 1.4;
 }
 
-/* ── Daily Challenge Badge ───────────────────────────────── */
-.daily-badge {
-  padding: 5px 16px;
-  background: rgba(255,200,50,0.12);
-  border: 1px solid rgba(255,200,50,0.4);
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: #ffd04b;
-  text-shadow: 0 0 8px rgba(255,208,75,0.6);
-  animation: pulse-daily 1.5s ease-in-out infinite alternate;
-}
-
-@keyframes pulse-daily {
-  from { box-shadow: 0 0 6px rgba(255,208,75,0.2); }
-  to   { box-shadow: 0 0 16px rgba(255,208,75,0.5); }
-}
-
-/* ── Player Name ─────────────────────────────────────────── */
-#player-name-wrap {
-  display: flex;
-  align-items: center;
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
 }
 
-#player-name-display {
-  font-size: 0.9rem;
-  font-weight: 700;
-  color: #7effb2;
-  cursor: pointer;
-  border-bottom: 1px dashed rgba(126,255,178,0.4);
-  padding-bottom: 2px;
-  transition: color 0.15s;
-}
-
-#player-name-display:hover {
-  color: #b0ffd8;
-}
-
-#player-name-input {
-  background: rgba(5,12,20,0.8);
-  border: 1px solid rgba(126,255,178,0.4);
-  border-radius: 6px;
-  color: #7effb2;
-  font-size: 0.88rem;
-  padding: 4px 10px;
-  outline: none;
-  width: 200px;
-}
-
-#player-name-input:focus {
-  border-color: rgba(126,255,178,0.8);
-  box-shadow: 0 0 8px rgba(126,255,178,0.3);
-}
-
-/* Controls list */
-#controls-hint {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 0.85rem;
-  color: rgba(160,220,255,0.7);
-  background: rgba(126,255,178,0.06);
-  border: 1px solid rgba(126,255,178,0.12);
-  padding: 12px 24px;
-  border-radius: 10px;
-  text-align: left;
-  width: 100%;
-}
-
-#controls-hint li strong {
-  color: #ffd04b;
-}
-
-/* Score on game-over */
-#score-display {
+.feature-chip {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  font-size: 0.9rem;
-  color: rgba(200,240,255,0.7);
-  background: rgba(126,255,178,0.08);
-  border: 1px solid rgba(126,255,178,0.2);
-  padding: 12px 36px;
+  padding: 10px 4px;
   border-radius: 10px;
-}
-
-#final-score {
-  font-size: 2.2rem;
-  font-weight: 800;
-  color: #7effb2;
-  line-height: 1.1;
-}
-
-/* Play button */
-#start-btn {
-  padding: 13px 52px;
-  font-size: 1rem;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  font-size: 0.68rem;
   font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #050a0f;
-  background: #7effb2;
-  border: none;
-  border-radius: 999px;
-  cursor: pointer;
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
-  box-shadow: 0 0 24px rgba(126,255,178,0.5);
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
 }
 
-#start-btn:hover {
-  transform: scale(1.06);
-  box-shadow: 0 0 40px rgba(126,255,178,0.75);
+.feature-chip span:first-child {
+  font-size: 1.2rem;
 }
 
-#start-btn:active {
-  transform: scale(0.97);
+.feature-chip #achievement-count {
+  color: var(--amber);
 }
 
-/* ─── Settings Panel ────────────────────────────────────────── */
+/* ── Settings Panel ──────────────────────────────────────────── */
 #settings-panel {
   width: 100%;
-  background: rgba(5,12,20,0.8);
-  border: 1px solid rgba(126,255,178,0.15);
-  border-radius: 12px;
-  padding: 14px 18px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 16px;
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
 .settings-header {
@@ -468,19 +599,16 @@ html, body {
   align-items: center;
   gap: 7px;
   font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  font-weight: 800;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: rgba(126,255,178,0.55);
-  border-bottom: 1px solid rgba(126,255,178,0.1);
+  color: var(--green);
+  border-bottom: 1px solid var(--line);
   padding-bottom: 10px;
 }
 
-.settings-icon {
-  font-size: 0.9rem;
-}
+.settings-icon { font-size: 0.9rem; }
 
-/* Row: label + control side by side */
 .setting-row {
   display: flex;
   align-items: center;
@@ -488,7 +616,6 @@ html, body {
   gap: 12px;
 }
 
-/* Variant: stacks vertically (for multi-button rows) */
 .setting-row--vertical {
   flex-direction: column;
   align-items: flex-start;
@@ -496,48 +623,33 @@ html, body {
 }
 
 .setting-label {
-  font-size: 0.82rem;
-  color: rgba(180,230,255,0.75);
+  font-size: 0.84rem;
+  color: var(--text);
   white-space: nowrap;
   cursor: default;
   user-select: none;
 }
 
-/* ── Mute toggle button ─────────────────────────────────────── */
 .toggle-btn {
-  padding: 4px 16px;
+  padding: 6px 18px;
   font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
+  font-weight: 800;
+  letter-spacing: 0.08em;
   border-radius: 999px;
-  border: 1px solid rgba(126,255,178,0.35);
-  background: rgba(126,255,178,0.08);
-  color: rgba(126,255,178,0.6);
+  border: 2px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text-dim);
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
   min-width: 56px;
 }
 
 .toggle-btn.active {
-  background: rgba(126,255,178,0.2);
-  color: #7effb2;
-  border-color: rgba(126,255,178,0.6);
-  text-shadow: 0 0 6px rgba(126,255,178,0.5);
+  background: var(--green);
+  color: #000;
+  border-color: var(--green);
 }
 
-.toggle-btn:hover {
-  border-color: rgba(126,255,178,0.5);
-}
-
-/* Achievement count */
-.achievement-count {
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: #ffd04b;
-  letter-spacing: 0.04em;
-}
-
-/* ── Sensitivity slider ─────────────────────────────────────── */
 .slider-wrap {
   display: flex;
   align-items: center;
@@ -550,7 +662,7 @@ html, body {
   width: 130px;
   height: 4px;
   border-radius: 2px;
-  background: rgba(126,255,178,0.18);
+  background: var(--line);
   outline: none;
   cursor: pointer;
 }
@@ -558,37 +670,34 @@ html, body {
 #setting-sensitivity::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: #7effb2;
-  box-shadow: 0 0 6px rgba(126,255,178,0.7);
+  background: var(--green);
   cursor: pointer;
   transition: transform 0.12s;
 }
 
-#setting-sensitivity::-webkit-slider-thumb:hover {
-  transform: scale(1.25);
-}
+#setting-sensitivity::-webkit-slider-thumb:hover { transform: scale(1.2); }
 
 #setting-sensitivity::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: #7effb2;
+  background: var(--green);
   border: none;
   cursor: pointer;
 }
 
 #sensitivity-val {
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
-  color: rgba(126,255,178,0.7);
+  color: var(--green);
   min-width: 20px;
   text-align: right;
+  font-weight: 700;
 }
 
-/* ── Snake design selector ──────────────────────────────────── */
 .design-btns {
   display: flex;
   gap: 7px;
@@ -596,36 +705,32 @@ html, body {
 }
 
 .design-btn {
-  padding: 5px 13px;
+  padding: 6px 14px;
   font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  border-radius: 6px;
-  border: 1px solid rgba(126,255,178,0.2);
-  background: rgba(126,255,178,0.04);
-  color: rgba(160,220,255,0.6);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  border-radius: 8px;
+  border: 2px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text-dim);
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 
-.design-btn:hover {
-  border-color: rgba(126,255,178,0.4);
-  color: rgba(200,255,220,0.85);
-}
+.design-btn:hover { border-color: var(--green-dim); }
 
 .design-btn.active {
-  background: rgba(126,255,178,0.18);
-  border-color: rgba(126,255,178,0.6);
-  color: #7effb2;
-  text-shadow: 0 0 5px rgba(126,255,178,0.4);
+  background: var(--green);
+  border-color: var(--green);
+  color: #000;
 }
 
 /* ── Stats Panel ─────────────────────────────────────────────── */
 #stats-panel {
   width: 100%;
-  background: rgba(5,12,20,0.8);
-  border: 1px solid rgba(126,255,178,0.12);
-  border-radius: 12px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 16px;
   overflow: hidden;
 }
 
@@ -633,31 +738,24 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 18px;
+  padding: 14px 18px;
   font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
+  font-weight: 800;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(126,255,178,0.55);
+  color: var(--green);
   cursor: pointer;
   user-select: none;
   transition: background 0.15s;
 }
 
-.stats-header:hover {
-  background: rgba(126,255,178,0.05);
-}
+.stats-header:hover { background: var(--panel-2); }
 
-.stats-arrow {
-  transition: transform 0.2s;
-}
-
-.stats-arrow.open {
-  transform: rotate(90deg);
-}
+.stats-arrow { transition: transform 0.2s; color: var(--text-dim); }
+.stats-arrow.open { transform: rotate(90deg); }
 
 #stats-body {
-  padding: 0 18px 12px;
+  padding: 0 18px 14px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -667,26 +765,18 @@ html, body {
   display: flex;
   justify-content: space-between;
   font-size: 0.8rem;
-  color: rgba(160,220,255,0.7);
-  border-bottom: 1px solid rgba(126,255,178,0.06);
-  padding: 3px 0;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--line);
+  padding: 6px 0;
 }
 
 .stat-row span:last-child {
-  font-weight: 700;
-  color: #7effb2;
+  font-weight: 800;
+  color: var(--green);
 }
 
 /* ─── Utility ───────────────────────────────────────────────── */
 .hidden { display: none !important; }
-
-/* ─── Lives / HP Meter ──────────────────────────────────────── */
-#hud-lives {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  pointer-events: none;
-}
 
 .life-heart {
   font-size: 1.05rem;
@@ -702,7 +792,6 @@ html, body {
   transform: scale(0.8);
 }
 
-/* Flash animation when a life is lost */
 @keyframes life-lost-flash {
   0%   { background: rgba(255,60,60,0.38); }
   100% { background: transparent; }
@@ -729,15 +818,11 @@ html, body {
   border-radius: 999px;
   white-space: nowrap;
   transition: opacity 0.3s ease, transform 0.2s ease;
-  /* Perf: was backdrop-filter blur, shown live over the redrawing canvas
-     during gameplay — same GPU cost issue as the HUD pills above. */
   background: rgba(8,16,26,0.82);
   border: 1px solid;
 }
 
-.powerup-badge:hover {
-  transform: scale(1.05);
-}
+.powerup-badge:hover { transform: scale(1.05); }
 
 .powerup-badge.magnet {
   background: rgba(80,180,255,0.18);
@@ -803,47 +888,6 @@ html, body {
 @keyframes pulse-speed {
   from { opacity: 0.8; }
   to   { opacity: 1; box-shadow: 0 0 12px rgba(255,255,128,0.6); }
-}
-
-/* Controls hint additions */
-#controls-hint .hint-new {
-  color: rgba(200,255,200,0.75);
-  border-top: 1px solid rgba(126,255,178,0.12);
-  margin-top: 4px;
-  padding-top: 6px;
-}
-
-/* ── Best Score — game-over overlay ────────────────────────── */
-#best-score-display {
-  margin-top: 10px;
-  text-align: center;
-}
-
-#best-score-display p:first-child {
-  font-size: 0.82rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  color: rgba(255,215,0,0.75);
-  text-transform: uppercase;
-  margin: 0;
-}
-
-#best-score-value {
-  font-size: 2.2rem;
-  font-weight: 900;
-  letter-spacing: 0.06em;
-  color: #ffd700;
-  text-shadow: 0 0 14px rgba(255,215,0,0.65);
-  margin: 2px 0 0;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Victory screen */
-#overlay-title.victory {
-  color: #ffd700;
-  text-shadow:
-    0 0 18px rgba(255,215,0,0.8),
-    0 0 50px rgba(255,215,0,0.4);
 }
 
 /* ─── Pause Button (in HUD) ────────────────────────────────── */
