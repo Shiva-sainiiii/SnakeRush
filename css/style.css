@@ -8,7 +8,8 @@
 html, body {
   width: 100%;
   height: 100%;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: #050a0f;
   font-family: 'Segoe UI', system-ui, sans-serif;
   color: #e0f0ff;
@@ -16,6 +17,17 @@ html, body {
   touch-action: none;
   /* Fill the safe area on iOS notch devices */
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* A hair taller than the viewport purely so the browser has 1px of
+   page-level scroll room to collapse its address bar into on load
+   (see the _hideAddressBar script). All real UI still lives in
+   position:fixed layers (#overlay, #hud, #game-canvas) so this
+   invisible overscroll never affects layout or gameplay. */
+body::after {
+  content: '';
+  display: block;
+  height: 1px;
 }
 
 /* ─── Canvas ────────────────────────────────────────────────── */
@@ -262,7 +274,7 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 22px;
+  gap: 14px;
   margin: auto 0;
 }
 
@@ -270,13 +282,13 @@ html, body {
 #hero-block {
   position: relative;
   width: 100%;
-  min-height: calc(100svh - 48px);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 14px;
+  gap: 8px;
   text-align: center;
+  padding-top: 50px; /* clears the icon buttons pinned to the top corners */
 }
 
 /* Top-corner icon buttons — gear (settings) top-left, speaker top-right */
@@ -310,27 +322,34 @@ html, body {
 .icon-btn.active { border-color: var(--green); }
 
 #overlay-title {
-  font-size: clamp(2.6rem, 11vw, 4.6rem);
+  font-size: clamp(1.55rem, 7.3vw, 3.2rem);
   font-weight: 900;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.03em;
   color: var(--green);
   line-height: 1;
+  white-space: nowrap;
+}
+
+@media (max-width: 360px) {
+  #overlay-title {
+    font-size: clamp(1.3rem, 7vw, 3.2rem);
+    letter-spacing: 0.01em;
+  }
 }
 
 #overlay-byline {
-  font-size: 0.85rem;
+  font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--amber);
-  margin-top: -4px;
 }
 
 #overlay-subtitle {
-  font-size: 0.95rem;
+  font-size: 0.82rem;
   color: var(--text-dim);
   letter-spacing: 0.02em;
-  margin-bottom: 6px;
+  margin-bottom: 2px;
 }
 
 /* Player nickname — solid input bar, slither.io style */
@@ -346,12 +365,12 @@ html, body {
 #player-name-input {
   width: 100%;
   text-align: center;
-  font-size: 1.05rem;
+  font-size: 0.95rem;
   font-weight: 700;
 }
 
 #player-name-display {
-  padding: 14px 20px;
+  padding: 11px 20px;
   border-radius: 12px;
   background: var(--panel);
   border: 2px solid var(--line);
@@ -366,7 +385,7 @@ html, body {
 }
 
 #player-name-input {
-  padding: 14px 20px;
+  padding: 11px 20px;
   border-radius: 12px;
   background: var(--panel);
   border: 2px solid var(--green);
@@ -376,9 +395,9 @@ html, body {
 
 /* Play button — solid, punchy, no glow-blur soup */
 #start-btn {
-  margin-top: 6px;
-  padding: 16px 64px;
-  font-size: 1.1rem;
+  margin-top: 2px;
+  padding: 13px 56px;
+  font-size: 1rem;
   font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -458,13 +477,13 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .hint-card-track {
   position: relative;
   width: 100%;
-  height: 84px;
+  height: 64px;
 }
 
 .hint-card {
@@ -472,9 +491,9 @@ html, body {
   inset: 0;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 18px 20px;
-  border-radius: 14px;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 12px;
   background: var(--panel);
   border: 2px solid var(--line);
   opacity: 0;
@@ -491,14 +510,14 @@ html, body {
 }
 
 .hint-icon {
-  font-size: 1.6rem;
+  font-size: 1.3rem;
   flex-shrink: 0;
 }
 
 .hint-text {
-  font-size: 0.92rem;
+  font-size: 0.78rem;
   color: var(--text);
-  line-height: 1.35;
+  line-height: 1.25;
   text-align: left;
 }
 
@@ -508,12 +527,12 @@ html, body {
 
 .hint-dots {
   display: flex;
-  gap: 6px;
+  gap: 5px;
 }
 
 .hint-dots .dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: var(--line);
   transition: background 0.2s ease, transform 0.2s ease;
@@ -529,38 +548,38 @@ html, body {
   width: 100%;
   background: var(--panel);
   border: 2px solid var(--line);
-  border-radius: 16px;
-  padding: 18px 20px;
+  border-radius: 14px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 9px;
 }
 
 .feature-card-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.8rem;
+  font-size: 0.68rem;
   font-weight: 800;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--green);
 }
 
-.feature-card-icon { font-size: 0.9rem; }
+.feature-card-icon { font-size: 0.8rem; }
 
 .mode-btns {
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
 .mode-btn {
   flex: 1;
-  padding: 10px 10px;
-  font-size: 0.85rem;
+  padding: 7px 8px;
+  font-size: 0.76rem;
   font-weight: 700;
-  letter-spacing: 0.03em;
-  border-radius: 10px;
+  letter-spacing: 0.02em;
+  border-radius: 8px;
   border: 2px solid var(--line);
   background: var(--panel-2);
   color: var(--text-dim);
@@ -579,34 +598,34 @@ html, body {
 }
 
 .mode-desc {
-  font-size: 0.78rem;
+  font-size: 0.68rem;
   color: var(--text-dim);
-  line-height: 1.4;
+  line-height: 1.3;
 }
 
 .feature-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  gap: 6px;
 }
 
 .feature-chip {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 10px 4px;
-  border-radius: 10px;
+  gap: 2px;
+  padding: 6px 3px;
+  border-radius: 8px;
   background: var(--panel-2);
   border: 1px solid var(--line);
-  font-size: 0.68rem;
+  font-size: 0.58rem;
   font-weight: 700;
   color: var(--text-dim);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
 }
 
 .feature-chip span:first-child {
-  font-size: 1.2rem;
+  font-size: 1rem;
 }
 
 .feature-chip #achievement-count {
