@@ -70,53 +70,80 @@
 
   <!-- Start / Game-Over overlay -->
   <div id="overlay">
-    <div id="overlay-content">
-      <h1 id="overlay-title">🐍 SNAKE RUSH</h1>
-      <p id="overlay-subtitle">Eat food. Grow big. Outlast the rest.</p>
+    <div id="overlay-scroll">
 
-      <!-- Mode selector -->
-      <div id="mode-selector">
-        <span class="mode-label">Game Mode</span>
+      <!-- ══ HERO — name, byline, nickname, play — always the first thing seen ══ -->
+      <div id="hero-block">
+        <div id="daily-badge" class="daily-badge hidden">📅 DAILY CHALLENGE</div>
+
+        <h1 id="overlay-title">SNAKE RUSH</h1>
+        <p id="overlay-byline">by Shiva Saini</p>
+        <p id="overlay-subtitle">Eat food. Grow big. Outlast the rest.</p>
+
+        <!-- Player name display -->
+        <div id="player-name-wrap">
+          <input type="text" id="player-name-input" class="hidden" maxlength="28" placeholder="Your snake name" />
+          <span id="player-name-display" title="Tap to rename">Crimson Viper</span>
+        </div>
+
+        <button id="start-btn">Play</button>
+
+        <div id="score-display" style="display:none;">
+          <p>Your final score</p>
+          <p id="final-score">0</p>
+        </div>
+
+        <div id="best-score-display" style="display:none;">
+          <p>🏆 Best Score</p>
+          <p id="best-score-value">0</p>
+        </div>
+      </div>
+      <!-- ══ /HERO ══ -->
+
+      <!-- ══ Rotating instruction cards — one visible at a time, auto-cycling ══ -->
+      <div id="hint-carousel" aria-live="polite">
+        <div class="hint-card-track" id="hint-track">
+          <div class="hint-card active" data-i="0"><span class="hint-icon">🖱️</span><span class="hint-text">Move your mouse or finger to steer the snake</span></div>
+          <div class="hint-card" data-i="1"><span class="hint-icon">⚡</span><span class="hint-text">Hold click or touch to <strong>boost</strong> forward</span></div>
+          <div class="hint-card" data-i="2"><span class="hint-icon">⚠️</span><span class="hint-text">Don't hit walls or other snakes — game over</span></div>
+          <div class="hint-card" data-i="3"><span class="hint-icon">🧲</span><span class="hint-text">Magnet power-up pulls nearby food toward you</span></div>
+          <div class="hint-card" data-i="4"><span class="hint-icon">⚔️</span><span class="hint-text">Attack power-up — bite enemies to shatter them</span></div>
+          <div class="hint-card" data-i="5"><span class="hint-icon">❤️</span><span class="hint-text">You get <strong>3 lives</strong> per run — use them wisely</span></div>
+          <div class="hint-card" data-i="6"><span class="hint-icon">💊</span><span class="hint-text"><strong>Lifeline</strong> orb — eat it to recover a lost life</span></div>
+          <div class="hint-card" data-i="7"><span class="hint-icon">🛡️</span><span class="hint-text">Shield — full invincibility for 4 seconds</span></div>
+          <div class="hint-card" data-i="8"><span class="hint-icon">👻</span><span class="hint-text">Ghost — pass straight through snake bodies for 4s</span></div>
+          <div class="hint-card" data-i="9"><span class="hint-icon">💣</span><span class="hint-text">Mine — drop explosive traps behind you every 2s</span></div>
+          <div class="hint-card" data-i="10"><span class="hint-icon">⚡</span><span class="hint-text">Speed Boost — 40% faster for 5 seconds</span></div>
+        </div>
+        <div class="hint-dots" id="hint-dots"></div>
+      </div>
+      <!-- ══ /instruction cards ══ -->
+
+      <!-- ══ Feature card — game mode + skills/powers summary ══ -->
+      <div id="feature-card">
+        <div class="feature-card-header">
+          <span class="feature-card-icon">🎮</span>
+          <span>Game Mode &amp; Features</span>
+        </div>
+
         <div class="mode-btns" role="group" aria-label="Game mode">
           <button class="mode-btn active" data-mode="classic">Classic</button>
           <button class="mode-btn" data-mode="timetrial">Time Trial</button>
         </div>
         <div id="mode-desc" class="mode-desc">Eat food, grow big, outlast 10 AI snakes. 3 lives.</div>
+
+        <div class="feature-grid">
+          <div class="feature-chip"><span>🧲</span>Magnet</div>
+          <div class="feature-chip"><span>⚔️</span>Attack</div>
+          <div class="feature-chip"><span>🛡️</span>Shield</div>
+          <div class="feature-chip"><span>👻</span>Ghost</div>
+          <div class="feature-chip"><span>💣</span>Mine</div>
+          <div class="feature-chip"><span>⚡</span>Speed</div>
+          <div class="feature-chip"><span>💊</span>Lifeline</div>
+          <div class="feature-chip"><span>🏆</span><span id="achievement-count">0 / 8</span></div>
+        </div>
       </div>
-
-      <!-- Daily Challenge badge -->
-      <div id="daily-badge" class="daily-badge hidden">📅 DAILY CHALLENGE</div>
-
-      <!-- Player name display -->
-      <div id="player-name-wrap">
-        <span id="player-name-display" title="Click to rename">Crimson Viper</span>
-        <input type="text" id="player-name-input" class="hidden" maxlength="28" placeholder="Your snake name" />
-      </div>
-
-      <ul id="controls-hint">
-        <li>🖱️ Move mouse to steer</li>
-        <li>🖱️ Hold click (or touch) to <strong>boost</strong></li>
-        <li>⚠️ Don't hit walls or other snakes</li>
-        <li class="hint-new">🧲 Magnet power-up pulls nearby food</li>
-        <li class="hint-new">⚔️ Attack power-up — bite enemies to shatter them</li>
-        <li class="hint-new">⚠️ AI snakes can grab Attack food too — they'll bite back!</li>
-        <li class="hint-new">❤️ You have <strong>3 lives</strong> — use them wisely</li>
-        <li class="hint-new">💊 <strong>Lifeline</strong> orb — eat it to recover a lost life</li>
-        <li class="hint-new">🛡️ Shield — full invincibility for 4s</li>
-        <li class="hint-new">👻 Ghost — pass through snake bodies for 4s</li>
-        <li class="hint-new">💣 Mine — drop explosive traps every 2s</li>
-        <li class="hint-new">⚡ Speed Boost — 40% faster for 5s</li>
-      </ul>
-
-      <div id="score-display" style="display:none;">
-        <p>Your final score</p>
-        <p id="final-score">0</p>
-      </div>
-
-      <div id="best-score-display" style="display:none;">
-        <p>🏆 Best Score</p>
-        <p id="best-score-value">0</p>
-      </div>
+      <!-- ══ /feature card ══ -->
 
       <!-- ── Settings Panel ───────────────────────────────── -->
       <div id="settings-panel">
@@ -156,12 +183,6 @@
             <button class="design-btn" data-design="designer">Designer</button>
           </div>
         </div>
-
-        <!-- Achievements count -->
-        <div class="setting-row">
-          <label class="setting-label">🏆 Achievements</label>
-          <span id="achievement-count" class="achievement-count">0 / 8</span>
-        </div>
       </div>
       <!-- ── /Settings Panel ──────────────────────────────── -->
 
@@ -183,7 +204,6 @@
       </div>
       <!-- ── /Stats Panel ─────────────────────────────────── -->
 
-      <button id="start-btn">Play</button>
     </div>
   </div>
 
@@ -224,6 +244,67 @@
   <script src="js/game_part3.js"></script>
   <script src="js/game_part4.js"></script>
   <script src="js/game_part5.js"></script>
+
+  <!-- Rotating instruction cards on the start screen: one card visible
+       at a time, auto-advancing, with dot indicators. Pauses while the
+       overlay is hidden (i.e. during actual gameplay) to save cycles. -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const track = document.getElementById('hint-track');
+      const dotsWrap = document.getElementById('hint-dots');
+      const overlay = document.getElementById('overlay');
+      if (!track || !dotsWrap) return;
+
+      const cards = Array.from(track.querySelectorAll('.hint-card'));
+      if (!cards.length) return;
+
+      // Build dot indicators
+      cards.forEach((_, i) => {
+        const dot = document.createElement('span');
+        dot.className = 'dot' + (i === 0 ? ' active' : '');
+        dot.addEventListener('click', () => goTo(i));
+        dotsWrap.appendChild(dot);
+      });
+      const dots = Array.from(dotsWrap.children);
+
+      let current = 0;
+      let timer = null;
+      const INTERVAL = 2800;
+
+      function goTo(i) {
+        cards[current].classList.remove('active');
+        dots[current].classList.remove('active');
+        current = i;
+        cards[current].classList.add('active');
+        dots[current].classList.add('active');
+      }
+
+      function next() {
+        goTo((current + 1) % cards.length);
+      }
+
+      function start() {
+        if (timer) return;
+        timer = setInterval(next, INTERVAL);
+      }
+
+      function stop() {
+        if (timer) { clearInterval(timer); timer = null; }
+      }
+
+      // Only run while the start/game-over overlay is actually visible
+      if (overlay) {
+        const obs = new MutationObserver(() => {
+          if (overlay.classList.contains('hidden')) stop();
+          else start();
+        });
+        obs.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+        if (!overlay.classList.contains('hidden')) start();
+      } else {
+        start();
+      }
+    });
+  </script>
 
   <!-- HUD wiring for boost + powerup badges -->
   <!-- Perf: this used to run innerHTML writes + array allocations every
