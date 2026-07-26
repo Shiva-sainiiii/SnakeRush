@@ -148,7 +148,14 @@
         </div>
         <div id="mode-desc" class="mode-desc">Eat food, grow big, outlast 10 AI snakes. 3 lives.</div>
 
-        <div class="feature-grid">
+        <!-- Collapsible power-ups list — collapsed by default so the start
+             screen isn't cluttered with 8 icons on first load; tap to see
+             the full power-up roster. -->
+        <button id="powerups-toggle" class="powerups-toggle" aria-expanded="false" aria-controls="feature-grid">
+          <span>⚡ Power-ups &amp; Features</span>
+          <span id="powerups-toggle-arrow" class="powerups-toggle-arrow">▾</span>
+        </button>
+        <div class="feature-grid hidden" id="feature-grid">
           <div class="feature-chip"><span>🧲</span>Magnet</div>
           <div class="feature-chip"><span>⚔️</span>Attack</div>
           <div class="feature-chip"><span>🛡️</span>Shield</div>
@@ -238,6 +245,20 @@
     <button id="pause-btn" aria-label="Pause game" title="Pause">⏸</button>
   </div>
 
+  <!-- First-run quick tutorial — shown only once (localStorage flag),
+       fades out on its own a few seconds after the first game starts.
+       Sits above the HUD but doesn't block input (pointer-events: none). -->
+  <div id="quick-tutorial" class="hidden">
+    <div class="quick-tutorial-card">
+      <span class="quick-tutorial-icon">👆</span>
+      <span class="quick-tutorial-text">Swipe / move to steer</span>
+    </div>
+    <div class="quick-tutorial-card">
+      <span class="quick-tutorial-icon">⚡</span>
+      <span class="quick-tutorial-text">Hold to boost</span>
+    </div>
+  </div>
+
   <!-- Pause overlay: shown when game is paused (manual or auto on tab-hide) -->
   <div id="pause-overlay" class="hidden">
     <div id="pause-panel">
@@ -278,6 +299,55 @@
       if (closeBtn) closeBtn.addEventListener('click', close);
       document.addEventListener('keydown', e => {
         if (e.key === 'Escape' && !modal.classList.contains('hidden')) close();
+      });
+    });
+  </script>
+
+  <!-- First-run quick tutorial: shows once on the very first game start
+       (tracked via localStorage), auto-fades after ~3s. Watches #overlay
+       for the 'hidden' class instead of hooking into startGame() directly,
+       so it stays decoupled from the game engine files. -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const TUTORIAL_KEY = 'snakeRush_seenTutorial';
+      const overlay  = document.getElementById('overlay');
+      const tutorial = document.getElementById('quick-tutorial');
+      if (!overlay || !tutorial) return;
+      if (localStorage.getItem(TUTORIAL_KEY)) return; // already seen
+
+      const showTutorial = () => {
+        localStorage.setItem(TUTORIAL_KEY, '1');
+        tutorial.classList.remove('hidden');
+        requestAnimationFrame(() => tutorial.classList.add('visible'));
+        setTimeout(() => {
+          tutorial.classList.remove('visible');
+          setTimeout(() => tutorial.classList.add('hidden'), 400);
+        }, 3000);
+      };
+
+      const observer = new MutationObserver(() => {
+        if (overlay.classList.contains('hidden')) {
+          showTutorial();
+          observer.disconnect();
+        }
+      });
+      observer.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+    });
+  </script>
+
+  <!-- Power-ups & Features collapsible toggle — collapsed by default to
+       keep the start screen from looking cluttered with 8 icons. -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const toggle = document.getElementById('powerups-toggle');
+      const arrow  = document.getElementById('powerups-toggle-arrow');
+      const grid   = document.getElementById('feature-grid');
+      if (!toggle || !grid) return;
+
+      toggle.addEventListener('click', () => {
+        const isHidden = grid.classList.toggle('hidden');
+        toggle.setAttribute('aria-expanded', String(!isHidden));
+        if (arrow) arrow.textContent = isHidden ? '▾' : '▴';
       });
     });
   </script>
