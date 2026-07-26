@@ -303,19 +303,22 @@ function getSegmentR(snakeOrIsPlayer = false) {
   // only cared about player-vs-AI) or an actual snake instance (new call
   // sites that want per-species thickness).
   if (snakeOrIsPlayer === true) {
+    const game = window._game;
+    const girth = (game && game.player && game.player._girthMul) || 1;
     switch (Settings.design) {
-      case 'fatty':  return Math.round(SEGMENT_R_BASE * 1.45);
-      case 'thin':   return Math.round(SEGMENT_R_BASE * 0.60);
-      default:       return SEGMENT_R_BASE;
+      case 'fatty':  return Math.round(SEGMENT_R_BASE * 1.45 * girth);
+      case 'thin':   return Math.round(SEGMENT_R_BASE * 0.60 * girth);
+      default:       return Math.round(SEGMENT_R_BASE * girth);
     }
   }
   if (snakeOrIsPlayer && snakeOrIsPlayer.isPlayer) {
     return getSegmentR(true);
   }
+  const girth = (snakeOrIsPlayer && snakeOrIsPlayer._girthMul) || 1;
   if (snakeOrIsPlayer && snakeOrIsPlayer.radiusMul) {
-    return Math.round(SEGMENT_R_BASE * snakeOrIsPlayer.radiusMul);
+    return Math.round(SEGMENT_R_BASE * snakeOrIsPlayer.radiusMul * girth);
   }
-  return SEGMENT_R_BASE;
+  return Math.round(SEGMENT_R_BASE * girth);
 }
 
 let _designerPaletteIdx = 0;
@@ -356,7 +359,10 @@ class Snake {
     this._trailMax = 8;
   }
 
-  get length() { return this.segments.length; }
+  // True length keeps counting food eaten even after the segment array
+  // hits the perf cap (see _grow) — UI shows this so players still see
+  // their length climbing, while the simulated body stays capped.
+  get length() { return Math.max(this.segments.length, this._trueLength || this.segments.length); }
   get head()   { return this.segments[0]; }
 
   _applyDirection(dt) {
@@ -386,11 +392,28 @@ class Snake {
     }
   }
 
-  eat(points = 1) { this._growBuffer += 4; this.score += points; }
+  eat(points = 1) {
+    this._growBuffer += 4;
+    this.score += points;
+    this._trueLength = (this._trueLength || this.segments.length) + 4;
+  }
 
   _grow() {
     if (this._growBuffer <= 0) return;
     this._growBuffer--;
+
+    // Once the physics segment array hits the perf cap, stop pushing new
+    // segments (that's what made _moveSegments()/collision cost climb
+    // forever on long runs) and grow girth instead — the snake keeps
+    // visibly getting bigger, just via thickness instead of segment count.
+    if (this.segments.length >= MAX_PHYSICS_SEGMENTS) {
+      this._girthMul = Math.min(
+        MAX_GIRTH_MUL,
+        (this._girthMul || 1) + GIRTH_PER_EXTRA_SEGMENT
+      );
+      return;
+    }
+
     const segs = this.segments;
     const tail = segs[segs.length - 1];
     if (segs.length >= 2) {

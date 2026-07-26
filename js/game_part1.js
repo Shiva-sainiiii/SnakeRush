@@ -538,6 +538,17 @@ const FOOD_COUNT    = _IS_MOBILE ? 1500 : 2500;
 const AI_COUNT      = _IS_MOBILE ? 9   : 14;
 const SEGMENT_GAP   = 8;
 const SEGMENT_R_BASE = 9;
+
+// Perf cap: above this many physics segments, the snake stops growing its
+// actual segment array and instead grows a "girth" multiplier (thicker
+// body, same segment count). This keeps _moveSegments()/collision cost
+// bounded even after eating thousands of food — score/length shown in the
+// UI keeps counting normally, only the simulated body length is capped.
+const MAX_PHYSICS_SEGMENTS = 600;
+// How much extra radius per "virtual" segment beyond the cap, tuned so the
+// snake visibly keeps getting fatter instead of just stopping.
+const GIRTH_PER_EXTRA_SEGMENT = 0.0018;
+const MAX_GIRTH_MUL = 2.6;
 const BASE_SPEED    = 190;
 const BOOST_SPEED   = 300;
 const BOOST_DRAIN   = 0.6;

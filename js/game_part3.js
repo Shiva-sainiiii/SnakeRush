@@ -1251,8 +1251,22 @@ class Game {
         // pass-through, invincibility) are unchanged.
         const saInAttack = sa.attackTimer > 0;
         const sbInAttack = sb.attackTimer > 0;
+
+        // Perf: body-collision loops used to check EVERY segment. With a
+        // long snake (thousands of segments after eating a lot of food)
+        // this becomes a huge per-pair cost, run every frame, for every
+        // nearby snake — the main cause of lag/stutter on long runs.
+        // Segments sit only SEGMENT_GAP(=8px) apart while the kill radius
+        // is much bigger (segR*1.8, segR is ~9-13px+), so consecutive
+        // segments overlap heavily in hit-coverage. Skipping a stride of
+        // them on very long bodies loses no real accuracy but cuts the
+        // check count drastically. Short bodies (<300 segs) are checked
+        // in full since the cost is negligible there anyway.
+        const strideB = sb.segments.length > 300 ? Math.ceil(sb.segments.length / 300) : 1;
+        const strideA = sa.segments.length > 300 ? Math.ceil(sa.segments.length / 300) : 1;
+
         const killDsqB = (getSegmentR(sb.isPlayer ? true : sb) * 1.8) ** 2;
-        for (let s = 1; s < sb.segments.length; s++) {
+        for (let s = 1; s < sb.segments.length; s += strideB) {
           if (Vector2.distSq(sa.head, sb.segments[s]) >= killDsqB) continue;
           // Ghost: skip body collision
           if (sa === this.player && this.player.isGhost) break;
@@ -1270,7 +1284,7 @@ class Game {
 
         // Head-vs-body (sb → sa): hit radius uses sa's body thickness
         const killDsqA = (getSegmentR(sa.isPlayer ? true : sa) * 1.8) ** 2;
-        for (let s = 1; s < sa.segments.length; s++) {
+        for (let s = 1; s < sa.segments.length; s += strideA) {
           if (Vector2.distSq(sb.head, sa.segments[s]) >= killDsqA) continue;
           if (sb === this.player && this.player.isGhost) break;
           if (sa === this.player && this.player.invincible) break;
