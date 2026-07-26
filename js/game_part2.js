@@ -323,6 +323,16 @@ function getSegmentR(snakeOrIsPlayer = false) {
 
 let _designerPaletteIdx = 0;
 let _designerTimer      = 0;
+
+// Looks up the currently selected skin definition. Falls back to the
+// always-free 'multicolour' skin if the stored choice points at a skin
+// that isn't actually unlocked (e.g. localStorage was partially cleared),
+// so the player never ends up silently drawing a broken/undefined skin.
+function getActiveSkin() {
+  const def = SKINS_DEF.find(s => s.id === Settings.design);
+  if (def && (!def.unlock || SkinSystem.isUnlocked(def.id))) return def;
+  return SKINS_DEF[0];
+}
 const DESIGNER_CYCLE    = 4;
 
 function tickDesignerPalette(dt) {
@@ -504,7 +514,8 @@ class Snake {
     let bodyFill  = inAttack ? '#8b1a1a' : this._resolveBodyColor();
     let headFill  = inAttack ? '#ff2222' : this._resolveHeadColor();
     const glowColor = inAttack ? '#ff2222' : (inShield ? '#a0d8ff' : (inSpeed ? '#ffff80' : headFill));
-    const isMulticolour = this.isPlayer && Settings.design === 'multicolour' && !inAttack;
+    const playerSkin = this.isPlayer ? getActiveSkin() : null;
+    const isMulticolour = this.isPlayer && playerSkin && playerSkin.kind === 'palette' && !inAttack;
     const isStriped = !this.isPlayer && this.stripePattern && !inAttack;
 
     // Body
@@ -513,12 +524,13 @@ class Snake {
     const _logH = ctx.canvas.height / _dpr;
 
     if (isMulticolour) {
+      const pal = playerSkin.palette;
       for (let i = len - 1; i >= 1; i--) {
         const sx = segs[i].x - camX, sy = segs[i].y - camY;
         if (sx < -segR * 2 || sx > _logW + segR * 2 || sy < -segR * 2 || sy > _logH + segR * 2) continue;
         ctx.beginPath();
         ctx.arc(sx, sy, segR, 0, Math.PI * 2);
-        ctx.fillStyle = MULTICOLOUR_PALETTE[i % MULTICOLOUR_PALETTE.length];
+        ctx.fillStyle = pal[i % pal.length];
         ctx.fill();
       }
     } else if (isStriped) {
@@ -617,11 +629,19 @@ class Snake {
   }
 
   _resolveBodyColor() {
-    if (this.isPlayer && Settings.design === 'designer') return DESIGNER_PALETTES[_designerPaletteIdx][0];
+    if (!this.isPlayer) return this.bodyColor;
+    const skin = getActiveSkin();
+    if (skin.kind === 'designer') return DESIGNER_PALETTES[_designerPaletteIdx][0];
+    if (skin.kind === 'solid')    return skin.body;
+    if (skin.kind === 'palette')  return skin.palette[0]; // used only as a non-multicolour fallback fill
     return this.bodyColor;
   }
   _resolveHeadColor() {
-    if (this.isPlayer && Settings.design === 'designer') return DESIGNER_PALETTES[_designerPaletteIdx][1];
+    if (!this.isPlayer) return this.headColor;
+    const skin = getActiveSkin();
+    if (skin.kind === 'designer') return DESIGNER_PALETTES[_designerPaletteIdx][1];
+    if (skin.kind === 'solid')    return skin.head;
+    if (skin.kind === 'palette')  return skin.head;
     return this.headColor;
   }
 

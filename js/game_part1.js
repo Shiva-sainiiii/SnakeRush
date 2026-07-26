@@ -41,16 +41,39 @@ const Settings = {
   gyro:        false,
 };
 
+/* Persist a subset of Settings across sessions (design choice, sensitivity,
+   mode) so the player doesn't have to re-pick their skin every visit. Mute
+   is deliberately NOT persisted — defaulting to off each visit avoids a
+   surprise blast of audio on load. */
+(function loadPersistedSettings() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+    if (stored.design && typeof stored.design === 'string') Settings.design = stored.design;
+    if (typeof stored.sensitivity === 'number') Settings.sensitivity = stored.sensitivity;
+    if (stored.mode === 'classic' || stored.mode === 'timetrial') Settings.mode = stored.mode;
+  } catch(_) {}
+})();
+
+function savePersistedSettings() {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      design: Settings.design, sensitivity: Settings.sensitivity, mode: Settings.mode,
+    }));
+  } catch(_) {}
+}
+
 /* ─────────────────────────────────────────────────────────────
    PERSISTENCE KEYS
 ───────────────────────────────────────────────────────────── */
 const HS_KEY           = 'snakeRush_bestScore';
-const TT_KEY           = 'snakeRush_timeTrial_best';
+const TT_KEY            = 'snakeRush_timeTrial_best';
 const PROFILE_KEY      = 'snakeRush_profile';
 const ACHIEVEMENTS_KEY = 'snakeRush_achievements';
 const PLAYER_NAME_KEY  = 'snakeRush_playerName';
 const DAILY_DATE_KEY   = 'snakeRush_dailyDate';
 const DAILY_SCORE_KEY  = 'snakeRush_dailyScore';
+const SKINS_KEY         = 'snakeRush_unlockedSkins';
+const SETTINGS_KEY      = 'snakeRush_settings';
 
 /* ─────────────────────────────────────────────────────────────
    HIGH SCORE
@@ -391,6 +414,8 @@ class AchievementManager {
     // Update overlay count
     const el = document.getElementById('achievement-count');
     if (el) el.textContent = `${this._unlocked.size} / ${ACHIEVEMENTS_DEF.length}`;
+    // Some skins unlock alongside a specific achievement — check now.
+    if (typeof SkinSystem !== 'undefined') SkinSystem.checkAchievement(id);
   }
 
   resetRun() {
@@ -630,6 +655,93 @@ const MULTICOLOUR_PALETTE = [
   '#ff5e57','#ffa41b','#ffdd00','#7bff6a',
   '#00d2ff','#8c52ff','#ff52c0','#52ffca',
 ];
+
+/* ─────────────────────────────────────────────────────────────
+   SKINS — the 4 original styles are free from the start; the rest
+   unlock via achievements or score milestones so returning players
+   have something new to chase. Each skin is either a flat body
+   colour+head pair (solid), or a repeating segment palette like the
+   built-in Multicolour style (palette).
+───────────────────────────────────────────────────────────── */
+const SKINS_DEF = [
+  { id: 'multicolour', name: 'Multicolour', kind: 'palette', palette: MULTICOLOUR_PALETTE,
+    head: '#ffffff', unlock: null },
+  { id: 'fatty',       name: 'Fatty',       kind: 'solid', body: '#7bff6a', head: '#c8ffc0',
+    unlock: null },
+  { id: 'thin',        name: 'Thin',        kind: 'solid', body: '#52ffca', head: '#c8fff0',
+    unlock: null },
+  { id: 'designer',    name: 'Designer',    kind: 'designer',
+    unlock: null },
+
+  { id: 'crimson',     name: 'Crimson Fang', kind: 'palette',
+    palette: ['#ff2b2b', '#ff6a3b', '#ffb23b'], head: '#ffdede',
+    unlock: { type: 'achievement', id: 'first_blood', label: 'Get your first kill' } },
+  { id: 'toxic',       name: 'Toxic Coil',   kind: 'palette',
+    palette: ['#7bff2b', '#c6ff3b', '#2bffb2'], head: '#e8ffe0',
+    unlock: { type: 'achievement', id: 'exterminator', label: 'Kill 5 snakes in one run' } },
+  { id: 'royal',       name: 'Royal Serpent', kind: 'palette',
+    palette: ['#8c52ff', '#c052ff', '#5271ff'], head: '#f0e0ff',
+    unlock: { type: 'achievement', id: 'boss_slayer', label: 'Defeat a Titan Serpent' } },
+  { id: 'gilded',      name: 'Gilded Legend', kind: 'palette',
+    palette: ['#ffd23b', '#ffea8a', '#fff6c9'], head: '#fffbe0',
+    unlock: { type: 'score', value: 5000, label: 'Score 5,000+ in one run' } },
+];
+
+const SkinSystem = {
+  _unlocked: null,
+
+  _load() {
+    if (this._unlocked) return this._unlocked;
+    try {
+      const stored = JSON.parse(localStorage.getItem(SKINS_KEY) || '[]');
+      this._unlocked = new Set(stored);
+    } catch(_) { this._unlocked = new Set(); }
+    // Free skins are always unlocked, even on a fresh profile.
+    for (const s of SKINS_DEF) if (!s.unlock) this._unlocked.add(s.id);
+    return this._unlocked;
+  },
+
+  _save() {
+    try { localStorage.setItem(SKINS_KEY, JSON.stringify([...this._unlocked])); } catch(_) {}
+  },
+
+  isUnlocked(id) { return this._load().has(id); },
+
+  unlock(id) {
+    this._load();
+    if (this._unlocked.has(id)) return false;
+    this._unlocked.add(id);
+    this._save();
+    return true;
+  },
+
+  // Called whenever an achievement unlocks or a run's score is finalized —
+  // checks if any skin's unlock condition is now met.
+  checkAchievement(achievementId) {
+    for (const s of SKINS_DEF) {
+      if (s.unlock && s.unlock.type === 'achievement' && s.unlock.id === achievementId) {
+        if (this.unlock(s.id)) this._announce(s);
+      }
+    }
+  },
+  checkScore(score) {
+    for (const s of SKINS_DEF) {
+      if (s.unlock && s.unlock.type === 'score' && score >= s.unlock.value) {
+        if (this.unlock(s.id)) this._announce(s);
+      }
+    }
+  },
+
+  _announce(skin) {
+    // Reuses the achievement toast queue if present so the unlock shows
+    // up the same way achievement pop-ups do, without a second UI system.
+    const mgr = window._game && window._game.achievements;
+    if (mgr && mgr._toasts) mgr._toasts.push({ name: `🎨 Skin Unlocked: ${skin.name}`, age: 0, life: 3.5 });
+    // Let the UI (skin selector grid) know so it can drop the lock icon
+    // immediately, even if the settings modal is open right now.
+    window.dispatchEvent(new CustomEvent('snakeRushSkinUnlocked', { detail: { skinId: skin.id } }));
+  },
+};
 
 /* AI striped body patterns — each is a repeating colour sequence applied
    segment-by-segment (like the player's multicolour design), giving each

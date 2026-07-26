@@ -420,17 +420,15 @@ class Game {
     sensSlider.addEventListener('input', () => {
       Settings.sensitivity = parseInt(sensSlider.value, 10);
       sensVal.textContent  = Settings.sensitivity;
+      savePersistedSettings();
     });
 
-    // Design buttons
-    const designBtns = document.querySelectorAll('.design-btn');
-    designBtns.forEach(btn => {
-      btn.addEventListener('click', () => {
-        designBtns.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        Settings.design = btn.dataset.design;
-      });
-    });
+    // Skin selector — rendered dynamically from SKINS_DEF so locked skins
+    // show a 🔒 + unlock hint instead of just not existing. Tapping a
+    // locked skin shows a toast with how to unlock it rather than
+    // switching (so it can't be selected before it's actually earned).
+    this._renderSkinSelector();
+    window.addEventListener('snakeRushSkinUnlocked', () => this._renderSkinSelector());
 
     // Mode buttons
     const modeBtns = document.querySelectorAll('.mode-btn');
@@ -445,6 +443,7 @@ class Game {
         btn.classList.add('active');
         Settings.mode = btn.dataset.mode;
         if (modeDescEl) modeDescEl.textContent = modeDescs[Settings.mode] || '';
+        savePersistedSettings();
       });
     });
 
@@ -462,6 +461,57 @@ class Game {
         });
       }
     }
+  }
+
+  // Builds the skin selector grid from SKINS_DEF. Locked skins show a 🔒
+  // and their unlock condition; tapping one shows a toast hint instead of
+  // switching. Re-called after achievement/score unlocks so a newly
+  // unlocked skin's lock icon disappears immediately without needing a
+  // page reload.
+  _renderSkinSelector() {
+    const container = document.getElementById('design-selector');
+    if (!container) return;
+    container.innerHTML = '';
+
+    for (const skin of SKINS_DEF) {
+      const unlocked = !skin.unlock || SkinSystem.isUnlocked(skin.id);
+      const btn = document.createElement('button');
+      btn.className = 'design-btn' + (Settings.design === skin.id ? ' active' : '') + (unlocked ? '' : ' locked');
+      btn.dataset.design = skin.id;
+      btn.innerHTML = unlocked
+        ? skin.name
+        : `<span class="design-btn-lock">🔒</span> ${skin.name}`;
+      if (!unlocked) {
+        btn.title = `Unlock: ${skin.unlock.label}`;
+        btn.setAttribute('aria-label', `${skin.name} — locked. Unlock: ${skin.unlock.label}`);
+      }
+
+      btn.addEventListener('click', () => {
+        if (!unlocked) {
+          this._showSkinLockedToast(skin);
+          return;
+        }
+        container.querySelectorAll('.design-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        Settings.design = skin.id;
+        savePersistedSettings();
+      });
+
+      container.appendChild(btn);
+    }
+  }
+
+  // Small toast telling the player how to unlock a skin they just tapped.
+  // Uses a DOM element inside the settings modal itself — the canvas
+  // achievement-toast queue isn't visible while the modal is open (it's
+  // drawn on the game canvas, which sits behind the overlay at this point).
+  _showSkinLockedToast(skin) {
+    const el = document.getElementById('skin-lock-toast');
+    if (!el) return;
+    el.textContent = `🔒 Unlock: ${skin.unlock.label}`;
+    el.classList.remove('hidden');
+    clearTimeout(this._skinToastTimer);
+    this._skinToastTimer = setTimeout(() => el.classList.add('hidden'), 2600);
   }
 
   /* ── START / RESET ──────────────────────────────────────── */
@@ -1337,6 +1387,7 @@ class Game {
     const best = HighScore.save(score);
     const p = Profile.get();
     if (score > p.bestScore) { p.bestScore = score; Profile.save(); }
+    SkinSystem.checkScore(score);
 
     if (DailyChallenge.isActive) DailyChallenge.saveBest(score);
     if (this._mode === 'timetrial') {
