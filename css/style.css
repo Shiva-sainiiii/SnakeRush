@@ -892,6 +892,29 @@ body::after {
   color: #000;
 }
 
+.design-btn.locked {
+  opacity: 0.55;
+  color: var(--text-dim);
+  border-style: dashed;
+}
+
+.design-btn.locked:hover { border-color: var(--line); }
+
+.design-btn-lock { font-size: 0.7rem; margin-right: 2px; }
+
+.skin-lock-toast {
+  width: 100%;
+  padding: 8px 12px;
+  margin-top: 4px;
+  border-radius: 8px;
+  background: rgba(255, 180, 60, 0.12);
+  border: 1px solid rgba(255, 180, 60, 0.4);
+  color: #ffcf7a;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-align: center;
+}
+
 /* ── Stats Panel ─────────────────────────────────────────────── */
 #stats-panel {
   width: 100%;
