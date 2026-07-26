@@ -34,19 +34,18 @@ SnakeRush/
 └── assets/
     ├── favicon-512.png / favicon-192.png / favicon-32.png / favicon-16.png
     ├── apple-touch-icon.png
-    └── audio/
-        ├── bgmusic.mp3         # Background music (loop)
-        ├── eat.mp3             # Eating food
-        ├── run.mp3             # Danger-zone running loop
-        ├── panic.mp3           # Low-life panic loop
-        ├── nearsnake.mp3       # Enemy snake nearby warning
-        ├── enemybite.mp3       # Player bitten by enemy
-        ├── kill.mp3            # Player kills an AI snake
-        ├── gameover.mp3        # Death / game over
-        ├── magnet.mp3          # Magnet power-up active
-        ├── lifeline.mp3        # Lifeline power-up active
-        ├── bossroar.mp3        # Titan Serpent (boss) spawn
-        └── bosskill.mp3        # Titan Serpent defeated
+    ├── bgmusic.mp3          # Background music (loop)
+    ├── eat.mp3              # Eating food
+    ├── run.mp3              # Danger-zone running loop
+    ├── panic.mp3            # Low-life panic loop
+    ├── nearsnake.mp3        # Enemy snake nearby warning
+    ├── enemybite.mp3        # Player bitten by enemy
+    ├── kill.mp3             # Player kills an AI snake
+    ├── gameover.mp3         # Death / game over
+    ├── magnet.mp3           # Magnet power-up active
+    ├── lifeline.mp3         # Lifeline power-up active
+    ├── bossroar.mp3         # Titan Serpent (boss) spawn
+    └── bosskill.mp3         # Titan Serpent defeated
 ```
 
 > Script load order matters — `js/game_part1.js` through `game_part5.js` must load in sequence (see `<script>` tags in `index.html`), since later parts depend on classes/constants defined earlier.
