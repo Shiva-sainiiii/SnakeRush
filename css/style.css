@@ -84,6 +84,37 @@ body::after {
 
 .quick-tutorial-icon { font-size: 1rem; }
 
+/* ── Random-event banner: food rain / double score window announcement.
+   Sits below the HUD row, fades in/out, never blocks touch input. ──── */
+#event-banner {
+  position: fixed;
+  left: 50%;
+  top: 78px;
+  transform: translateX(-50%);
+  z-index: 16;
+  pointer-events: none;
+  padding: 8px 20px;
+  border-radius: 22px;
+  background: rgba(10, 20, 18, 0.85);
+  border: 1.5px solid var(--green, #7effb2);
+  color: var(--green, #7effb2);
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-align: center;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.35s ease, transform 0.35s ease;
+  box-shadow: 0 0 18px rgba(126, 255, 178, 0.35);
+}
+
+#event-banner.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+#event-banner.hidden { display: none; }
+
 #hud {
   position: fixed;
   /* Push below the safe area (notch/dynamic island) */
