@@ -197,15 +197,12 @@
         </div>
       </div>
 
-      <!-- Snake design selector -->
+      <!-- Snake design selector — populated by JS from SKINS_DEF so locked
+           skins show a lock icon + unlock hint instead of being hidden. -->
       <div class="setting-row setting-row--vertical">
         <label class="setting-label">🎨 Snake Style</label>
-        <div class="design-btns" id="design-selector" role="group" aria-label="Snake style">
-          <button class="design-btn active" data-design="multicolour">Multicolour</button>
-          <button class="design-btn" data-design="fatty">Fatty</button>
-          <button class="design-btn" data-design="thin">Thin</button>
-          <button class="design-btn" data-design="designer">Designer</button>
-        </div>
+        <div class="design-btns" id="design-selector" role="group" aria-label="Snake style"></div>
+        <div id="skin-lock-toast" class="skin-lock-toast hidden"></div>
       </div>
 
       <!-- ── Stats Panel ──────────────────────────────────── -->

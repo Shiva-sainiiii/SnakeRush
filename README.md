@@ -56,6 +56,7 @@ SnakeRush/
 
 - **Classic & Time Trial** game modes
 - **Daily Challenge** — seeded RNG so every player gets the same challenge on a given day (AI count, food count, world size, enabled power-ups all vary)
+- **8 unlockable skins:** 4 free from the start (Multicolour, Fatty, Thin, Designer) + 4 earned via achievements/score milestones (Crimson Fang, Toxic Coil, Royal Serpent, Gilded Legend), persisted across sessions
 - **8 power-ups:** Magnet, Attack, Shield, Ghost, Mine, Speed Boost, Lifeline
 - **AI personalities:** aggressive, coward, hunter, farmer — with flocking behavior for aggressive types
 - **Boss Snake** — the Titan Serpent spawns periodically, high risk/reward
@@ -91,10 +92,9 @@ Net effect: snake keeps looking and feeling bigger the more you eat, but frame c
 
 ## 🚧 Roadmap / Next Up
 
-- [ ] Cosmetic skin unlocks tied to achievements/score milestones
+- [ ] Live/real-time Firebase leaderboard updates
+- [ ] Session streak / daily login rewards (XP or cosmetic per day)
 - [ ] Mini in-session quests ("Kill 3 snakes", "Eat 50 food")
 - [ ] Share-score card / screenshot export
 - [ ] Difficulty curve — AI gets smarter the longer a session runs
 - [ ] Randomized boss spawn interval (currently fixed at 90s)
-- [ ] Collapsible power-up info panel on the start screen for a cleaner first-look UI
-- [ ] Quick 3-second onboarding tutorial overlay for first-time players
