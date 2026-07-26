@@ -551,6 +551,10 @@ class Game {
     this.snakes   = [];
     this.player   = new PlayerSnake(worldW / 2, worldH / 2);
     this.player.name = getPlayerName();
+    // Explicit reset: a fresh run should always start thin (girth 1x),
+    // never carrying over thickness from a previous run's long snake.
+    this.player._girthMul   = 1;
+    this.player._trueLength = this.player.segments.length;
     this.snakes.push(this.player);
 
     for (let i = 0; i < aiCount; i++) {
@@ -1100,6 +1104,12 @@ class Game {
     p.dir   = new Vector2(1, 0);
     p.alive = true;
     p._growBuffer = 0;
+    // Bug fix: girth/true-length weren't reset here, so using an extra
+    // life would shrink the segment count back to 12 but keep the body
+    // rendering at its previous (thick) girth — looked like "size got
+    // smaller but thickness stayed the same". Both must reset together.
+    p._girthMul   = 1;
+    p._trueLength = p.segments.length;
     p.magnetTimer = 0; p.attackTimer = 0; p.shieldTimer = 0;
     p.ghostTimer  = 0; p.mineTimer   = 0; p.speedBoostTimer = 0;
     p.iFrameTimer = IFRAME_DURATION;

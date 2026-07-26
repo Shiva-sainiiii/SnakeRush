@@ -417,10 +417,12 @@ class Snake {
     // forever on long runs) and grow girth instead — the snake keeps
     // visibly getting bigger, just via thickness instead of segment count.
     if (this.segments.length >= MAX_PHYSICS_SEGMENTS) {
-      this._girthMul = Math.min(
-        MAX_GIRTH_MUL,
-        (this._girthMul || 1) + GIRTH_PER_EXTRA_SEGMENT
-      );
+      const trueLen = this._trueLength || this.segments.length;
+      const extra   = Math.max(0, trueLen - MAX_PHYSICS_SEGMENTS);
+      // sqrt curve — grows quickly at first, then keeps inching up across
+      // a very wide length range instead of hard-plateauing early.
+      const t = Math.sqrt(extra) / Math.sqrt(extra + GIRTH_CURVE_HALFLEN);
+      this._girthMul = 1 + (MAX_GIRTH_MUL - 1) * t;
       return;
     }
 

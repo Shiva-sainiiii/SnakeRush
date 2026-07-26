@@ -570,10 +570,16 @@ const SEGMENT_R_BASE = 9;
 // bounded even after eating thousands of food — score/length shown in the
 // UI keeps counting normally, only the simulated body length is capped.
 const MAX_PHYSICS_SEGMENTS = 600;
-// How much extra radius per "virtual" segment beyond the cap, tuned so the
-// snake visibly keeps getting fatter instead of just stopping.
-const GIRTH_PER_EXTRA_SEGMENT = 0.0018;
-const MAX_GIRTH_MUL = 2.6;
+// Girth curve tuning. The old formula was linear (+0.0018 per extra
+// segment) and hit its MAX_GIRTH_MUL ceiling by ~length 3900 — so a
+// length-6000 snake and a length-900,000 snake ended up the exact same
+// thickness, which read as "growth just stopped". This sqrt-based curve
+// keeps growing visibly across a much wider range: fast-ish early on,
+// then gradually slowing, but still inching thicker even past a million
+// length instead of going flat.
+const MAX_GIRTH_MUL       = 3.2;
+const GIRTH_CURVE_HALFLEN = 40000; // extra-length at which growth is ~halfway to max
+
 const BASE_SPEED    = 190;
 const BOOST_SPEED   = 300;
 const BOOST_DRAIN   = 0.6;
