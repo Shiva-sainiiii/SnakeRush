@@ -242,6 +242,11 @@
     <button id="pause-btn" aria-label="Pause game" title="Pause">⏸</button>
   </div>
 
+  <!-- Random-event banner (food rain / double score window) — DOM-based
+       so it's reliable regardless of world camera position, unlike the
+       in-world combo float text. -->
+  <div id="event-banner" class="hidden"></div>
+
   <!-- First-run quick tutorial — shown only once (localStorage flag),
        fades out on its own a few seconds after the first game starts.
        Sits above the HUD but doesn't block input (pointer-events: none). -->

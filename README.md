@@ -59,7 +59,9 @@ SnakeRush/
 - **8 unlockable skins:** 4 free from the start (Multicolour, Fatty, Thin, Designer) + 4 earned via achievements/score milestones (Crimson Fang, Toxic Coil, Royal Serpent, Gilded Legend), persisted across sessions
 - **8 power-ups:** Magnet, Attack, Shield, Ghost, Mine, Speed Boost, Lifeline
 - **AI personalities:** aggressive, coward, hunter, farmer — with flocking behavior for aggressive types
-- **Boss Snake** — the Titan Serpent spawns periodically, high risk/reward
+- **Boss Snake** — the Titan Serpent spawns periodically (randomized 70-110s interval so it's unpredictable), high risk/reward
+- **Difficulty curve** — AI steering (awareness, turn speed, aggression) gradually sharpens over the first ~8 minutes of a run, capping at +35%, so long sessions don't stay easy forever
+- **Random events** — periodic Food Rain (a burst of food around the player) and Double Score windows keep long runs feeling fresh
 - **Combo system** with floating multiplier text
 - **Kill feed**, **screen shake**, **hit-stop on kills**, **death cinematic**
 - **Achievement system** (8 achievements) with persistent profile stats
@@ -96,5 +98,3 @@ Net effect: snake keeps looking and feeling bigger the more you eat, but frame c
 - [ ] Session streak / daily login rewards (XP or cosmetic per day)
 - [ ] Mini in-session quests ("Kill 3 snakes", "Eat 50 food")
 - [ ] Share-score card / screenshot export
-- [ ] Difficulty curve — AI gets smarter the longer a session runs
-- [ ] Randomized boss spawn interval (currently fixed at 90s)
