@@ -589,6 +589,17 @@ class Game {
     this._nearSnakeLast = false;
     this._hitStopTimer  = 0;
     this._runStartTime  = performance.now();
+    this._difficultyT   = 0;
+
+    // Random events (food rain / double score) — see _updateRandomEvents.
+    // Only in Classic mode; kept out of Time Trial (too short to matter)
+    // and Daily Challenge (would break fair seeded-run comparison).
+    this._eventsEligible   = this._mode === 'classic' && !DailyChallenge.isActive;
+    this._nextEventCheck   = RANDOM_EVENT_CHECK_INTERVAL;
+    this._lastEventEndTime = -RANDOM_EVENT_MIN_GAP; // allow an early event
+    this._activeEvent      = null;   // 'foodRain' | 'doubleScore' | null
+    this._eventTimer       = 0;
+    this._scoreMultiplier  = 1;      // read by the eat() scoring code
 
     // Boss Snake (Titan Serpent) timer — first one arrives at BOSS_INTERVAL
     // seconds in, then again every BOSS_INTERVAL after the previous one
@@ -596,7 +607,7 @@ class Game {
     // short focused sprint) and Daily Challenge (keeps that mode's
     // difficulty predictable for fair seeded-run comparison).
     this._bossEligible = this._mode === 'classic' && !DailyChallenge.isActive;
-    this._bossTimer    = BOSS_INTERVAL;
+    this._bossTimer    = rollBossInterval();
     this._bossActive   = null;
 
     this.killFeed  = new KillFeed();
@@ -711,6 +722,15 @@ class Game {
     this.shake.update(dt);
     this.achievements.update(dt);
 
+    // Difficulty curve: 0 at run start, ramping to 1 over
+    // DIFFICULTY_RAMP_SECONDS. AISnake.update() reads this each frame to
+    // scale steering aggression — kept as a single shared value here
+    // rather than recomputed per-snake so all AI ramp in sync.
+    const elapsedRun = (performance.now() - this._runStartTime) / 1000;
+    this._difficultyT = getDifficultyT(elapsedRun);
+
+    this._updateRandomEvents(dt, elapsedRun);
+
     // Boss Snake timer
     if (this._bossEligible) {
       if (this._bossActive && !this._bossActive.alive) this._bossActive = null;
@@ -718,7 +738,7 @@ class Game {
         this._bossTimer -= dt;
         if (this._bossTimer <= 0) {
           this._spawnBoss();
-          this._bossTimer = BOSS_INTERVAL;
+          this._bossTimer = rollBossInterval();
         }
       }
     }
@@ -916,7 +936,8 @@ class Game {
         // eat() below, same as before this change (unchanged behavior).
 
         const comboMul = isPlayer ? this.combo.multiplier : 1;
-        const mult = (1 + Math.floor(snake.length / 20)) * comboMul;
+        const eventMul = isPlayer ? this._scoreMultiplier : 1;
+        const mult = (1 + Math.floor(snake.length / 20)) * comboMul * eventMul;
         snake.eat(mult);
         eaten.push(food);
 
@@ -992,6 +1013,76 @@ class Game {
 
     // Playtime
     Profile.add('totalPlaytimeSeconds', dt);
+  }
+
+  /* ── RANDOM EVENTS (food rain / double score) ───────────────
+     Keeps long sessions feeling fresh: every RANDOM_EVENT_CHECK_INTERVAL
+     seconds, rolls a chance to start one, as long as enough time has
+     passed since the last one ended and nothing is currently active. */
+  _updateRandomEvents(dt, elapsedRun) {
+    if (!this._eventsEligible) return;
+
+    if (this._activeEvent) {
+      this._eventTimer -= dt;
+      if (this._eventTimer <= 0) this._endRandomEvent(elapsedRun);
+      return;
+    }
+
+    this._nextEventCheck -= dt;
+    if (this._nextEventCheck > 0) return;
+    this._nextEventCheck = RANDOM_EVENT_CHECK_INTERVAL;
+
+    if (elapsedRun - this._lastEventEndTime < RANDOM_EVENT_MIN_GAP) return;
+    if (Math.random() >= RANDOM_EVENT_CHANCE) return;
+
+    const kind = Math.random() < 0.5 ? 'foodRain' : 'doubleScore';
+    this._startRandomEvent(kind);
+  }
+
+  _startRandomEvent(kind) {
+    this._activeEvent = kind;
+    if (kind === 'foodRain') {
+      this._eventTimer = FOOD_RAIN_DURATION;
+      const W = this._worldW, H = this._worldH;
+      const cx = this.player.alive ? this.player.head.x : W / 2;
+      const cy = this.player.alive ? this.player.head.y : H / 2;
+      // Rain falls in a cluster around the player so it's actually
+      // reachable, not scattered randomly across the whole map.
+      for (let i = 0; i < FOOD_RAIN_COUNT; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = 80 + Math.random() * 500;
+        const fx = Math.max(50, Math.min(W - 50, cx + Math.cos(ang) * dist));
+        const fy = Math.max(50, Math.min(H - 50, cy + Math.sin(ang) * dist));
+        this._spawnFood(FOOD_TYPE.NORMAL, fx, fy);
+      }
+      this._showEventBanner('🌧️ FOOD RAIN!');
+    } else {
+      this._eventTimer = DOUBLE_SCORE_DURATION;
+      this._scoreMultiplier = 2;
+      this._showEventBanner('⭐ DOUBLE SCORE!');
+    }
+  }
+
+  _endRandomEvent(elapsedRun) {
+    if (this._activeEvent === 'doubleScore') this._scoreMultiplier = 1;
+    this._activeEvent = null;
+    this._lastEventEndTime = elapsedRun;
+    this._hideEventBanner();
+  }
+
+  _showEventBanner(text) {
+    const el = document.getElementById('event-banner');
+    if (!el) return;
+    el.textContent = text;
+    el.classList.remove('hidden');
+    requestAnimationFrame(() => el.classList.add('visible'));
+  }
+
+  _hideEventBanner() {
+    const el = document.getElementById('event-banner');
+    if (!el) return;
+    el.classList.remove('visible');
+    setTimeout(() => el.classList.add('hidden'), 350);
   }
 
   /* ── BOSS SNAKE ─────────────────────────────────────────── */

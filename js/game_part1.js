@@ -645,8 +645,41 @@ const SPEED_MAX_ON_MAP       = 1;
 const NEAR_SNAKE_RADIUS  = 100;
 const DANGER_ZONE_DIST   = 250;
 
-// Boss Snake: seconds between Titan Serpent spawns (only one alive at a time)
-const BOSS_INTERVAL = 90;
+// Boss Snake: seconds between Titan Serpent spawns (only one alive at a
+// time). Randomized within a range each time instead of a fixed interval,
+// so a player can't predict exactly when the next Titan will show up.
+const BOSS_INTERVAL_MIN = 70;
+const BOSS_INTERVAL_MAX = 110;
+function rollBossInterval() {
+  return BOSS_INTERVAL_MIN + Math.random() * (BOSS_INTERVAL_MAX - BOSS_INTERVAL_MIN);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   DIFFICULTY CURVE — the longer a run goes, the sharper/more
+   aggressive AI steering becomes, so long sessions don't stay easy
+   forever. Ramps in gradually over DIFFICULTY_RAMP_SECONDS and caps
+   out at DIFFICULTY_MAX_BONUS so it stays fair rather than becoming
+   impossible.
+───────────────────────────────────────────────────────────── */
+const DIFFICULTY_RAMP_SECONDS = 480; // 8 minutes to reach max difficulty
+const DIFFICULTY_MAX_BONUS    = 0.35; // up to +35% sense radius / force / turn speed
+
+// Returns 0..1 based on how far into the difficulty ramp the run is.
+function getDifficultyT(elapsedSeconds) {
+  return Math.max(0, Math.min(1, elapsedSeconds / DIFFICULTY_RAMP_SECONDS));
+}
+
+/* ─────────────────────────────────────────────────────────────
+   RANDOM EVENTS — occasional short-lived world events to keep long
+   sessions feeling fresh. Rolled periodically during a run; only one
+   event runs at a time.
+───────────────────────────────────────────────────────────── */
+const RANDOM_EVENT_CHECK_INTERVAL = 45;  // how often to roll for a new event
+const RANDOM_EVENT_CHANCE         = 0.35; // chance per check once eligible
+const RANDOM_EVENT_MIN_GAP        = 60;  // minimum seconds between events
+const FOOD_RAIN_COUNT             = 40;
+const FOOD_RAIN_DURATION          = 8;
+const DOUBLE_SCORE_DURATION       = 15;
 
 /* Designer palette */
 const DESIGNER_PALETTES = [

@@ -974,11 +974,42 @@ class AISnake extends Snake {
       default:
         this.speed = BASE_SPEED * speciesSpeedMul;
     }
+
+    // Snapshot personality-tuned base values. The time-based difficulty
+    // curve (see update()) scales *from* these each frame rather than
+    // mutating them in place — otherwise repeated scaling would compound
+    // and drift the numbers well past their intended range.
+    this._baseSenseR       = this.SNAKE_SENSE_R;
+    this._baseMaxForce     = this.MAX_FORCE;
+    this._baseSteerLerp    = this.STEER_LERP;
+    this._basePursueThresh = this.pursueThreshold;
   }
 
   update(dt) {
     if (!this.alive) return;
     if (this.attackTimer > 0) this.attackTimer = Math.max(0, this.attackTimer - dt);
+
+    // ── Difficulty curve ───────────────────────────────────────
+    // The longer a run goes, the sharper AI steering/awareness gets, so a
+    // 10-minute session doesn't stay as easy as the first 30 seconds. The
+    // boss is excluded — a Titan is already tuned to be maximally
+    // relentless, so scaling it further would just feel unfair rather
+    // than "harder in an interesting way".
+    if (!this.isBoss) {
+      const dt_ = (window._game && window._game._difficultyT) || 0;
+      const bonus = 1 + dt_ * DIFFICULTY_MAX_BONUS;
+      this.SNAKE_SENSE_R = this._baseSenseR   * bonus;
+      this.MAX_FORCE     = this._baseMaxForce * bonus;
+      this.STEER_LERP    = this._baseSteerLerp * bonus;
+      // Pursue threshold moves the other way — lower means "willing to
+      // chase smaller size advantages", i.e. more aggressive. Never push
+      // it past a floor of 2 so a hard-coded 999 "never pursue" farmer
+      // still stays passive rather than flipping into a hunter.
+      if (this._basePursueThresh < 900) {
+        this.pursueThreshold = Math.max(2, this._basePursueThresh * (1 - dt_ * 0.3));
+      }
+    }
+
     const { nearbyFood, fleeTarget, pursueTarget, avoidNormal } = this._sense();
     this.state = this._evalFSM(dt, nearbyFood, fleeTarget, pursueTarget, avoidNormal);
 
