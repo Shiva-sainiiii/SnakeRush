@@ -84,6 +84,7 @@ const Settings = {
   design:      'multicolour',
   mode:        'classic',   // 'classic' | 'timetrial'
   gyro:        false,
+  face:        null,        // emoji face for player's head, null = classic eyes
 };
 
 /* Persist a subset of Settings across sessions (design choice, sensitivity,
@@ -96,6 +97,7 @@ const Settings = {
     if (stored.design && typeof stored.design === 'string') Settings.design = stored.design;
     if (typeof stored.sensitivity === 'number') Settings.sensitivity = stored.sensitivity;
     if (stored.mode === 'classic' || stored.mode === 'timetrial') Settings.mode = stored.mode;
+    if (typeof stored.face === 'string' || stored.face === null) Settings.face = stored.face;
   } catch(_) {}
 })();
 
@@ -103,9 +105,65 @@ function savePersistedSettings() {
   try {
     SafeStorage.setItem(SETTINGS_KEY, JSON.stringify({
       design: Settings.design, sensitivity: Settings.sensitivity, mode: Settings.mode,
+      face: Settings.face,
     }));
   } catch(_) {}
 }
+
+/* ─────────────────────────────────────────────────────────────
+   SNAKE FACE EMOJIS
+   Player-selectable + AI-random emoji set for snake heads. Kept as a
+   flat list (not grouped) since the settings grid just needs to render
+   them all as equal-weight tappable buttons.
+───────────────────────────────────────────────────────────── */
+const SNAKE_FACE_EMOJIS = [
+  '💩','🤡','😈','👿','👽','👺','👹','💀','🤖','😺','😸','😾','😼','😹','😻',
+  '🌚','🌝','🌞','🧒🏻','👶🏻','👼🏻','🧑🏻','🧓🏻','🫅🏻',
+  '🐵','🦁','🐯','🐱','🐶','🐺','🐻','🐻‍❄️','🐨','🐼','🐹','🐭','🐰','🦊','🐮','🐷','🐸',
+  '🎃','💸',
+  '😀','😃','😄','😁','😆','😅','😂','🤣','😍','🥰','😘','😚','😙','😗','😉','😭','🤩','🥳',
+  '🫠','🙃','🙂','🥲','🥹','😊','😛','😋','🤤','😏','🙂‍↕️','😌','☺️','😝','😜','🤪','🫪',
+  '😔','🥺','😬','😑','🤐','🫥','😶‍🌫️','😐','😶','😡','🤬','🤨','😤','😮‍💨','🙄','😒','😠',
+  '😓','😟','😥','😢','☹️','🙁','🫤','😕','😳','😲','😯','😮','😦','😧','😨','😰','🤯','😖',
+  '😣','😩','😫','😵','😵‍💫','🫨','😪','😴','🫩','🤮','🤢','🥶','🥵','🥴','🤧','🤒','🤕','😷',
+  '🤥','😇','🤠','🤑','🤓','😎','🥸',
+];
+
+/* Pre-renders each emoji onto its own small offscreen canvas exactly once,
+   then every future draw is a cheap drawImage() instead of a fillText().
+   fillText() on canvas is comparatively expensive (font shaping/glyph
+   lookup) and doing it every frame for every emoji-faced snake head would
+   add up fast with many AI snakes on screen. Caching flips that to a
+   single fillText per emoji ever, no matter how many frames or snakes
+   reuse it. Resolution is fixed regardless of on-screen size — the head
+   circle only ranges from small to boss-sized, so one crisp base texture
+   scales fine via drawImage's own scaling. */
+const EmojiIconCache = {
+  _cache: new Map(),
+  _SIZE: 64, // px, fixed render resolution per emoji tile
+
+  get(emoji) {
+    if (!emoji) return null;
+    let canvas = this._cache.get(emoji);
+    if (canvas) return canvas;
+
+    const size = this._SIZE;
+    canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const c = canvas.getContext('2d');
+    c.clearRect(0, 0, size, size);
+    c.font = `${Math.round(size * 0.82)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    // Slight downward nudge — most emoji fonts render a touch high of
+    // true vertical center against their own font metrics.
+    c.fillText(emoji, size / 2, size / 2 + size * 0.06);
+
+    this._cache.set(emoji, canvas);
+    return canvas;
+  },
+};
 
 /* ─────────────────────────────────────────────────────────────
    PERSISTENCE KEYS

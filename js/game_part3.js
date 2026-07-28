@@ -437,6 +437,9 @@ class Game {
     this._renderSkinSelector();
     window.addEventListener('snakeRushSkinUnlocked', () => this._renderSkinSelector());
 
+    // Snake face emoji selector — free for everyone, no unlock gating.
+    this._renderFaceSelector();
+
     // Mode buttons
     const modeBtns = document.querySelectorAll('.mode-btn');
     const modeDescEl = document.getElementById('mode-desc');
@@ -560,6 +563,47 @@ class Game {
     el.classList.remove('hidden');
     clearTimeout(this._skinToastTimer);
     this._skinToastTimer = setTimeout(() => el.classList.add('hidden'), 2600);
+  }
+
+  // Builds the emoji face picker grid — a "None" button (classic eyes)
+  // followed by one button per SNAKE_FACE_EMOJIS entry. No unlock gating,
+  // unlike skins — this is purely cosmetic and free. Built once; the
+  // active/inactive state is toggled directly on click rather than a
+  // full re-render, since nothing here ever needs to change from outside
+  // (no achievement/score events touch it).
+  _renderFaceSelector() {
+    const container = document.getElementById('face-selector');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const makeActive = (btn) => {
+      container.querySelectorAll('.face-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    };
+
+    const noneBtn = document.createElement('button');
+    noneBtn.className = 'face-btn face-btn--none' + (!Settings.face ? ' active' : '');
+    noneBtn.textContent = 'None';
+    noneBtn.setAttribute('aria-label', 'No face — classic eyes');
+    noneBtn.addEventListener('click', () => {
+      Settings.face = null;
+      makeActive(noneBtn);
+      savePersistedSettings();
+    });
+    container.appendChild(noneBtn);
+
+    for (const emoji of SNAKE_FACE_EMOJIS) {
+      const btn = document.createElement('button');
+      btn.className = 'face-btn' + (Settings.face === emoji ? ' active' : '');
+      btn.textContent = emoji;
+      btn.setAttribute('aria-label', `Snake face: ${emoji}`);
+      btn.addEventListener('click', () => {
+        Settings.face = emoji;
+        makeActive(btn);
+        savePersistedSettings();
+      });
+      container.appendChild(btn);
+    }
   }
 
   /* ── START / RESET ──────────────────────────────────────── */

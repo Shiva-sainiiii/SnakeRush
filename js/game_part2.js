@@ -355,6 +355,7 @@ class Snake {
     this.score     = 0;
     this.isPlayer  = isPlayer;
     this.name      = '';
+    this.face      = null; // emoji face override, null = classic eyes
 
     this.segments = [];
     for (let i = 0; i < initLen; i++) {
@@ -625,9 +626,33 @@ class Snake {
       ctx.restore();
     }
 
-    this._drawEyes(ctx, hx, hy, segR);
+    // Emoji face — player reads live from Settings (so switching in the
+    // settings modal mid-run updates instantly), AI snakes use whatever
+    // was randomly assigned to them at spawn. When a face is active it
+    // replaces the plain colored-circle eyes entirely, since the emoji
+    // itself already reads as a face.
+    const activeFace = this.isPlayer ? Settings.face : this.face;
+    if (activeFace) {
+      this._drawFace(ctx, hx, hy, segR, activeFace);
+    } else {
+      this._drawEyes(ctx, hx, hy, segR);
+    }
 
     if (isGhost) ctx.globalAlpha = 1;
+  }
+
+  // Draws a pre-cached emoji image centered on the head, scaled to the
+  // head's current radius (so it grows with girth like the plain head
+  // does). Kept upright rather than rotated to travel direction — emoji
+  // faces aren't directional glyphs like an arrow, so rotating them tends
+  // to look like the face is tilting/falling over rather than "looking"
+  // somewhere, especially mid-turn.
+  _drawFace(ctx, hx, hy, segR, emoji) {
+    const img = EmojiIconCache.get(emoji);
+    if (!img) { this._drawEyes(ctx, hx, hy, segR); return; }
+
+    const drawSize = segR * 2.3; // slightly larger than the head circle
+    ctx.drawImage(img, hx - drawSize / 2, hy - drawSize / 2, drawSize, drawSize);
   }
 
   _resolveBodyColor() {
@@ -834,6 +859,10 @@ function pickSpecies() {
 }
 
 const AI_PERSONALITIES = ['aggressive', 'coward', 'hunter', 'farmer'];
+// Fraction of non-boss AI snakes that spawn with a random emoji face
+// instead of plain eyes. Keeps some visual variety in the world without
+// making every single snake look like a costume party.
+const AI_FACE_CHANCE = 0.55;
 
 class AISnake extends Snake {
   constructor(x, y, bodyColor, headColor, foodGrid, snakes, forcedSpecies = null) {
@@ -857,6 +886,15 @@ class AISnake extends Snake {
     this.snakes   = snakes;
     this.state    = AI_STATE.WANDER;
     this.name     = this.isBoss ? 'Titan Serpent' : generateName();
+
+    // Random emoji face — most AI snakes get one for variety, but a chunk
+    // stay plain (classic eyes) so the world doesn't feel like *every*
+    // snake is wearing a costume. Boss keeps its own dedicated aura/look
+    // rather than a random emoji, matching how it already has a dedicated
+    // personality instead of a random roll above.
+    this.face = (!this.isBoss && Math.random() < AI_FACE_CHANCE)
+      ? SNAKE_FACE_EMOJIS[Math.floor(Math.random() * SNAKE_FACE_EMOJIS.length)]
+      : null;
 
     // Assign personality (independent of species — a Garter Snake can be
     // aggressive, an Anaconda can be a coward, etc.). The boss always gets
