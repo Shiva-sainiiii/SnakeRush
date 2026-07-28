@@ -870,6 +870,160 @@ body::after {
 
 #settings-close-btn:hover { color: var(--text); }
 
+/* ── Fullscreen Minimap — opened by tapping the in-game minimap ─── */
+#fullmap-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+}
+
+#fullmap-overlay.hidden { display: none; }
+
+#fullmap-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.88);
+}
+
+#fullmap-panel {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  height: 100%;
+  max-height: 92svh;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.fullmap-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--green);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+  flex: 0 0 auto;
+}
+
+.fullmap-icon { font-size: 0.9rem; }
+
+#fullmap-close-btn {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#fullmap-close-btn:hover { color: var(--text); }
+
+#fullmap-canvas {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #030608;
+  display: block;
+}
+
+#fullmap-list-wrap {
+  flex: 0 0 auto;
+  max-height: 30%;
+  min-height: 90px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fullmap-list-header {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  flex: 0 0 auto;
+}
+
+#fullmap-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 0;
+}
+
+.fullmap-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.fullmap-row.fullmap-row--player {
+  background: rgba(126,255,178,0.12);
+  border: 1px solid rgba(126,255,178,0.35);
+}
+
+.fullmap-row.fullmap-row--boss {
+  background: rgba(255,60,20,0.12);
+  border: 1px solid rgba(255,60,20,0.35);
+}
+
+.fullmap-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.fullmap-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.fullmap-row-len {
+  flex: 0 0 auto;
+  color: var(--green);
+  font-weight: 700;
+}
+
+.fullmap-row-pos {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-size: 0.66rem;
+  min-width: 66px;
+  text-align: right;
+}
+
 .setting-row {
   display: flex;
   align-items: center;
