@@ -1141,5 +1141,128 @@ class AudioManager {
 }
 
 /* ─────────────────────────────────────────────────────────────
+   1c. ANIMAL SOUND MANAGER
+   Plays a periodic sound clip matching the player's currently-selected
+   emoji face, e.g. 🐮 -> "moo" every so often. Deliberately separate from
+   AudioManager (which eager-loads every track at startup): AudioManager's
+   track list is small and every clip is used constantly, but this list is
+   ~40 optional animal clips that most players will never trigger in a
+   given session, so each file is fetched lazily on first actual use and
+   cached after that — never blocks or slows down page load.
+
+   HOOKING UP FILES: drop mp3s at assets/sounds/animals/<name>.mp3, where
+   <name> is the value in ANIMAL_SOUND_MAP below (e.g. assets/sounds/
+   animals/cow.mp3). Any emoji missing from the map, or whose file 404s,
+   is silently skipped — no crash, no console spam beyond one warning.
+───────────────────────────────────────────────────────────── */
+
+// Emoji -> sound file basename (without extension/folder). Only animal-ish
+// emoji need an entry; faces without one here simply never trigger a
+// sound. Extend freely — just add the mapping here and drop the matching
+// mp3 in assets/sounds/animals/.
+const ANIMAL_SOUND_MAP = {
+  '🐮': 'cow',
+  '🐱': 'cat',
+  '😺': 'cat',
+  '😸': 'cat',
+  '😾': 'cat',
+  '😼': 'cat',
+  '😹': 'cat',
+  '😻': 'cat',
+  '🐶': 'dog',
+  '🦁': 'lion',
+  '🐯': 'tiger',
+  '🐺': 'wolf',
+  '🐻': 'bear',
+  '🐻‍❄️': 'polarbear',
+  '🐨': 'koala',
+  '🐼': 'panda',
+  '🐹': 'hamster',
+  '🐭': 'mouse',
+  '🐰': 'rabbit',
+  '🦊': 'fox',
+  '🐷': 'pig',
+  '🐸': 'frog',
+  '🐵': 'monkey',
+};
+
+const AnimalSoundManager = {
+  _ctx: null,
+  _buffers: {},     // name -> decoded AudioBuffer
+  _loading: {},      // name -> in-flight Promise, avoids double-fetching
+  _failed: new Set(), // names that 404'd or failed to decode — don't retry
+  _sinceLast: 0,      // seconds since this face last made a sound
+  _nextInterval: 0,   // randomized gap until the next allowed sound
+  _lastFace: null,
+
+  _pickInterval() {
+    // Roughly every 10-15s as requested, with a touch of randomness so
+    // it doesn't feel like a metronome.
+    return 10 + Math.random() * 5;
+  },
+
+  // Call every frame from PlayerSnake.update(). Only actually does
+  // anything when the player has an animal-mapped face selected.
+  tick(dt, face) {
+    if (face !== this._lastFace) {
+      // Face changed (or cleared) — reset the timer fresh rather than
+      // carrying over a countdown from a different animal.
+      this._lastFace = face;
+      this._sinceLast = 0;
+      this._nextInterval = this._pickInterval();
+    }
+    const soundName = ANIMAL_SOUND_MAP[face];
+    if (!soundName) return;
+
+    this._sinceLast += dt;
+    if (this._sinceLast >= this._nextInterval) {
+      this._sinceLast = 0;
+      this._nextInterval = this._pickInterval();
+      this.play(soundName);
+    }
+  },
+
+  async play(name) {
+    if (Settings.muted || this._failed.has(name)) return;
+    try {
+      const buffer = await this._getBuffer(name);
+      if (!buffer || Settings.muted) return;
+      if (!this._ctx) this._ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const src  = this._ctx.createBufferSource();
+      const gain = this._ctx.createGain();
+      src.buffer      = buffer;
+      gain.gain.value = 0.75;
+      src.connect(gain);
+      gain.connect(this._ctx.destination);
+      src.start(0);
+    } catch (_) { /* never let a missing/broken sound file affect gameplay */ }
+  },
+
+  async _getBuffer(name) {
+    if (this._buffers[name]) return this._buffers[name];
+    if (this._loading[name]) return this._loading[name];
+
+    this._loading[name] = (async () => {
+      try {
+        if (!this._ctx) this._ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const resp = await fetch(`assets/sounds/animals/${name}.mp3`);
+        if (!resp.ok) throw new Error(`${name}.mp3 not found`);
+        const arr    = await resp.arrayBuffer();
+        const buffer = await this._ctx.decodeAudioData(arr);
+        this._buffers[name] = buffer;
+        return buffer;
+      } catch (e) {
+        this._failed.add(name);
+        console.warn(`[AnimalSoundManager] "${name}" unavailable — add assets/sounds/animals/${name}.mp3 to enable it.`);
+        return null;
+      } finally {
+        delete this._loading[name];
+      }
+    })();
+    return this._loading[name];
+  },
+};
+
+/* ─────────────────────────────────────────────────────────────
    2. SPATIAL GRID
 ───────────────────────────────────────────────────────────── */

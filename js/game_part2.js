@@ -566,6 +566,15 @@ class Snake {
       ctx.fill();
     }
 
+    // Centipede legs — a cheap cosmetic pass: two short strokes per
+    // alternating segment, perpendicular to the body direction at that
+    // point, with a per-segment wiggle so they look like they're actively
+    // scuttling rather than static ticks. Only centipedes pay this cost;
+    // every other snake/species skips this block entirely.
+    if (this.moveStyle === 'centipede') {
+      this._drawCentipedeLegs(ctx, camX, camY, segR, _logW, _logH);
+    }
+
     // Emoji face — player reads live from Settings (so switching in the
     // settings modal mid-run updates instantly), AI snakes use whatever
     // was randomly assigned to them at spawn. When active, it fully
@@ -662,6 +671,49 @@ class Snake {
     ctx.drawImage(img, hx - drawSize / 2, hy - drawSize / 2, drawSize, drawSize);
   }
 
+  // Cheap procedural legs for the centipede species: one pair of short
+  // perpendicular strokes on every other body segment, phase-shifted
+  // along the body and animated by the shared _wiggleT timer so alternate
+  // legs swing oppositely, like a real many-legged scuttle. All legs are
+  // drawn in a single stroke() call (one path, many subpaths) rather than
+  // one stroke per leg-pair, keeping this a fixed small per-frame cost
+  // regardless of body length.
+  _drawCentipedeLegs(ctx, camX, camY, segR, logW, logH) {
+    const segs = this.segments;
+    const len  = segs.length;
+    if (len < 2) return;
+
+    const legLen = segR * 1.3;
+    ctx.beginPath();
+    for (let i = 1; i < len; i += 2) {
+      const p = segs[i];
+      const prev = segs[i - 1];
+      const sx = p.x - camX, sy = p.y - camY;
+      if (sx < -segR * 2 || sx > logW + segR * 2 || sy < -segR * 2 || sy > logH + segR * 2) continue;
+
+      // Direction along the body at this segment, used to find the
+      // perpendicular (left/right) axis the legs stick out along.
+      let dx = prev.x - p.x, dy = prev.y - p.y;
+      const dlen = Math.sqrt(dx * dx + dy * dy) || 1;
+      dx /= dlen; dy /= dlen;
+      const px = -dy, py = dx; // perpendicular unit vector
+
+      // Alternate legs swing opposite directions, offset along the body
+      // (i * 0.9) so the wave travels down the length like a real gait.
+      const swing = Math.sin(this._wiggleT * 10 - i * 0.9) * 0.4;
+      const lx = px * (1 + swing), ly = py * (1 + swing);
+
+      ctx.moveTo(sx + lx * legLen * 0.3, sy + ly * legLen * 0.3);
+      ctx.lineTo(sx + lx * legLen, sy + ly * legLen);
+      ctx.moveTo(sx - lx * legLen * 0.3, sy - ly * legLen * 0.3);
+      ctx.lineTo(sx - lx * legLen, sy - ly * legLen);
+    }
+    ctx.strokeStyle = this._resolveBodyColor();
+    ctx.lineWidth = Math.max(1, segR * 0.28);
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  }
+
   _resolveBodyColor() {
     if (!this.isPlayer) return this.bodyColor;
     const skin = getActiveSkin();
@@ -724,6 +776,11 @@ class PlayerSnake extends Snake {
 
   update(dt, camX, camY, joystickDir = null, gyroDir = null) {
     if (!this.alive) return;
+
+    // Periodic animal sound for the player's selected face (e.g. 🐮 moos
+    // every ~10-15s). No-op instantly for faces with no mapped sound, and
+    // costs nothing extra on frames where it's not yet time to play.
+    AnimalSoundManager.tick(dt, Settings.face);
 
     if (this.iFrameTimer   > 0) this.iFrameTimer   = Math.max(0, this.iFrameTimer   - dt);
     if (this.magnetTimer   > 0) this.magnetTimer   = Math.max(0, this.magnetTimer   - dt);
@@ -846,6 +903,31 @@ const SNAKE_SPECIES = [
     weight: 8,  scoreMul: 2.0,
   },
   {
+    // Slow, thick, low-key mover — same segment-drawing path as a normal
+    // snake, just with different stats and a duller flat color so it
+    // doesn't look like a small snake. No legs/wiggle needed for this
+    // one, unlike centipede/ant below.
+    id: 'slug', label: 'Slug',
+    minLen: 10, maxLen: 16,  radiusMul: 0.95, speedMul: 0.55,
+    weight: 10, scoreMul: 0.9, moveStyle: 'slug',
+  },
+  {
+    // Many short segments + rendered legs and a per-segment wiggle offset
+    // (see _drawLegs / wiggle in Snake.draw). Faster than its size would
+    // suggest, matching a real centipede's quick scuttle.
+    id: 'centipede', label: 'Centipede',
+    minLen: 18, maxLen: 28,  radiusMul: 0.5,  speedMul: 1.35,
+    weight: 12, scoreMul: 1.1, moveStyle: 'centipede',
+  },
+  {
+    // Tiny and fast with erratic, twitchy steering (see _applyMoveStyle in
+    // AISnake.update) — reads as a skittering insect rather than a smooth
+    // snake glide.
+    id: 'ant', label: 'Ant',
+    minLen: 4,  maxLen: 6,   radiusMul: 0.4,  speedMul: 1.6,
+    weight: 14, scoreMul: 0.5, moveStyle: 'insect',
+  },
+  {
     // Boss tier: weight 0 so pickSpecies() (used for normal AI spawns and
     // respawns) never rolls this by chance — it's only ever assigned
     // directly by the dedicated boss-spawn call in Game.
@@ -884,6 +966,14 @@ class AISnake extends Snake {
     this.radiusMul  = species.radiusMul;
     this.scoreMul   = species.scoreMul;
     this.isBoss     = species.id === 'titan';
+    // 'slug' | 'centipede' | 'insect' | undefined (undefined = normal snake
+    // glide). Read by Snake.draw() for body rendering and by this class's
+    // update() for steering-personality tweaks.
+    this.moveStyle  = species.moveStyle || null;
+    // Used by the centipede leg-wiggle and the insect jitter-walk — a
+    // free-running timer rather than something tied to distance travelled,
+    // so it animates even at a dead stop.
+    this._wiggleT   = Math.random() * 10;
 
     this.foodGrid = foodGrid;
     this.snakes   = snakes;
@@ -1028,6 +1118,7 @@ class AISnake extends Snake {
   update(dt) {
     if (!this.alive) return;
     if (this.attackTimer > 0) this.attackTimer = Math.max(0, this.attackTimer - dt);
+    this._wiggleT += dt;
 
     // ── Difficulty curve ───────────────────────────────────────
     // The longer a run goes, the sharper AI steering/awareness gets, so a
@@ -1087,6 +1178,20 @@ class AISnake extends Snake {
     }
 
     this.dir = this.dir.lerp(this.dir.add(force), lerpT).normalize();
+
+    // Insects (ants) skitter rather than glide smoothly — layer a fast,
+    // small-amplitude random wobble on top of whatever the normal AI
+    // steering already decided. Kept additive/small so it still actually
+    // reaches food and reacts to danger correctly; it's cosmetic twitch,
+    // not a replacement for real steering.
+    if (this.moveStyle === 'insect') {
+      const jitterAngle = Math.sin(this._wiggleT * 14) * 0.35 + Math.sin(this._wiggleT * 31) * 0.18;
+      const cosA = Math.cos(jitterAngle), sinA = Math.sin(jitterAngle);
+      const jx = this.dir.x * cosA - this.dir.y * sinA;
+      const jy = this.dir.x * sinA + this.dir.y * cosA;
+      this.dir = new Vector2(jx, jy).normalize();
+    }
+
     const personalityMul = this.personality === 'aggressive' ? 1.08
                           : this.personality === 'coward'    ? 0.95
                           : this.personality === 'hunter'    ? 1.05
