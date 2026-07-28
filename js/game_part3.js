@@ -282,7 +282,10 @@ class Game {
       this._pointer.y = e.clientY;
     });
 
-    this.canvas.addEventListener('mousedown',  () => { if (this.running && !this.paused && this.player) this.player.boosting = true;  });
+    this.canvas.addEventListener('mousedown',  (e) => {
+      if (this._isPointOnMinimap(e.clientX, e.clientY)) { this._openFullMapIfRunning(); return; }
+      if (this.running && !this.paused && this.player) this.player.boosting = true;
+    });
     this.canvas.addEventListener('mouseup',    () => { if (this.player) this.player.boosting = false; });
     this.canvas.addEventListener('mouseleave', () => { if (this.player) this.player.boosting = false; });
 
@@ -307,6 +310,15 @@ class Game {
         e.preventDefault(); // prevent click-delay ghost tap on iOS
 
         for (const t of e.changedTouches) {
+          // A tap landing on the minimap opens the fullscreen map instead
+          // of being claimed as the joystick finger — checked first, and
+          // only for the very first finger down, so a second finger added
+          // mid-steer (for boost) never accidentally triggers this.
+          if (this._joystickTouchId === null && !this._joystick.active &&
+              this._isPointOnMinimap(t.clientX, t.clientY)) {
+            this._openFullMapIfRunning();
+            continue;
+          }
           if (this._joystickTouchId === null && !this._joystick.active) {
             // First finger down → claim it as the joystick finger
             this._joystickTouchId = t.identifier;
@@ -373,6 +385,7 @@ class Game {
       // Desktop fallback touch (e.g. Chrome DevTools device emulation)
       this.canvas.addEventListener('touchstart', e => {
         const t = e.touches[0];
+        if (this._isPointOnMinimap(t.clientX, t.clientY)) { this._openFullMapIfRunning(); return; }
         this._pointer.x = t.clientX; this._pointer.y = t.clientY;
         if (this.running && this.player) this.player.boosting = true;
       }, { passive: true });
@@ -385,6 +398,24 @@ class Game {
         if (this.player) this.player.boosting = false;
       }, { passive: true });
     }
+  }
+
+  // Hit-test a client-space point (e.g. touch/mouse clientX/clientY)
+  // against the small in-game minimap's current on-screen rect. The
+  // canvas fills the full viewport with no offset (see _setupResize —
+  // logW/logH are window.innerWidth/innerHeight), so clientX/clientY map
+  // directly to the same logical-pixel space _getMinimapRect() uses.
+  _isPointOnMinimap(clientX, clientY) {
+    if (!this.running || this.paused) return false;
+    const logW = window.innerWidth, logH = window.innerHeight;
+    const rect = this._getMinimapRect(logW, logH);
+    return clientX >= rect.x && clientX <= rect.x + rect.w &&
+           clientY >= rect.y && clientY <= rect.y + rect.h;
+  }
+
+  _openFullMapIfRunning() {
+    if (!this.running) return;
+    if (typeof window._openFullMap === 'function') window._openFullMap();
   }
 
   _setupGyro() {

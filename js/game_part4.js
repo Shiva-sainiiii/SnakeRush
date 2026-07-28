@@ -224,24 +224,30 @@ Object.assign(Game.prototype, {
     ctx.fillRect(0, 0, logW, logH);
   },
 
+  // Shared geometry for the small in-game minimap — used both by
+  // _drawMinimap() below and by the canvas tap/click handlers (in
+  // game_part3.js) that detect a tap on the minimap to open the
+  // fullscreen map. Keeping this in one place means the tappable area
+  // always exactly matches what's drawn, even as responsive sizing
+  // changes on narrow screens.
+  _getMinimapRect(logW, logH) {
+    const isNarrow   = logW < 480;
+    const MAP_W      = isNarrow ? 110 : 150;
+    const MAP_H      = isNarrow ? 110 : 150;
+    const MAP_PAD    = isNarrow ? 8 : 14;
+    const MAP_X      = logW - MAP_W - MAP_PAD;
+    const HUD_CLEARANCE = isNarrow ? 95 : 70;
+    const MAP_Y      = HUD_CLEARANCE + MAP_PAD;
+    return { x: MAP_X, y: MAP_Y, w: MAP_W, h: MAP_H };
+  },
+
   _drawMinimap(logW, logH) {
     const { ctx } = this;
 
     // ── Responsive minimap sizing ─────────────────────────────
     // On narrow portrait phones (< 480px wide) shrink the minimap so it
     // cannot collide with the HUD pill or overflow the right edge.
-    const isNarrow   = logW < 480;
-    const MAP_W      = isNarrow ? 110 : 150;
-    const MAP_H      = isNarrow ? 110 : 150;
-    // Keep minimap clear of the safe-area right edge
-    const safeRight  = 0; // canvas ctx is already in logical coords; CSS safe-area handled by body padding
-    const MAP_PAD    = isNarrow ? 8 : 14;
-    const MAP_X      = logW - MAP_W - MAP_PAD;
-    // Top: push below safe-area inset + HUD height headroom
-    // HUD can wrap to multiple rows with powerups, so use a larger clearance
-    // Safer estimate: safe-area + 80px for HUD + gaps
-    const HUD_CLEARANCE = isNarrow ? 95 : 70;
-    const MAP_Y      = HUD_CLEARANCE + MAP_PAD;
+    const { x: MAP_X, y: MAP_Y, w: MAP_W, h: MAP_H } = this._getMinimapRect(logW, logH);
 
     const W = this._worldW, H = this._worldH;
     const SCALE_X = MAP_W / W, SCALE_Y = MAP_H / H;
@@ -293,5 +299,157 @@ Object.assign(Game.prototype, {
     }
 
     ctx.restore();
+
+    // Small expand hint so the minimap reads as tappable — drawn outside
+    // the clip region above so it isn't cut off by the rounded corners.
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = 'rgba(126,255,178,0.9)';
+    ctx.font = '9px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('⤢', MAP_X + MAP_W - 4, MAP_Y + MAP_H - 3);
+    ctx.restore();
+  },
+
+  // Fullscreen map — opened by tapping the small in-game minimap. Draws
+  // the entire world on a larger dedicated canvas (#fullmap-canvas, not
+  // the main game canvas) and rebuilds the snake-list panel underneath
+  // it. Called from a requestAnimationFrame loop owned by the inline
+  // script in index.html, only while the overlay is open, so this never
+  // costs anything during normal gameplay.
+  _drawFullMap() {
+    const canvas = document.getElementById('fullmap-canvas');
+    if (!canvas) return;
+
+    // Match the canvas's backing-store resolution to its actual on-screen
+    // CSS size (it's flex-sized by the panel layout, so this can change
+    // as the overlay opens/resizes) — same dpr-scaling approach as the
+    // main game canvas.
+    const dpr  = this._dpr || 1;
+    const cssW = canvas.clientWidth  || 300;
+    const cssH = canvas.clientHeight || 300;
+    const physW = Math.round(cssW * dpr), physH = Math.round(cssH * dpr);
+    if (canvas.width !== physW || canvas.height !== physH) {
+      canvas.width  = physW;
+      canvas.height = physH;
+    }
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    const W = this._worldW, H = this._worldH;
+    // Letterbox-fit the (square) world into whatever aspect ratio the
+    // canvas element actually has, centered, so it's never stretched.
+    const scale = Math.min(cssW / W, cssH / H);
+    const offX = (cssW - W * scale) / 2;
+    const offY = (cssH - H * scale) / 2;
+    const toX = (wx) => offX + wx * scale;
+    const toY = (wy) => offY + wy * scale;
+
+    // Background + border
+    ctx.fillStyle = '#050a0f';
+    ctx.fillRect(offX, offY, W * scale, H * scale);
+    ctx.strokeStyle = 'rgba(126,255,178,0.3)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(offX, offY, W * scale, H * scale);
+
+    // Food — drawn as tiny dots, far too small individually to render
+    // per-type detail at this zoom level, same simplification the small
+    // minimap already makes.
+    ctx.fillStyle = 'rgba(126,255,178,0.35)';
+    for (const f of this.foods) {
+      if (f.expired) continue;
+      ctx.fillRect(toX(f.pos.x) - 0.75, toY(f.pos.y) - 0.75, 1.5, 1.5);
+    }
+
+    // Snakes — collect list rows alongside drawing so both stay in sync
+    // and we only walk this.snakes once.
+    const rows = [];
+
+    for (let i = 1; i < this.snakes.length; i++) {
+      const s = this.snakes[i];
+      if (!s.alive) continue;
+      const sx = toX(s.head.x), sy = toY(s.head.y);
+
+      if (s.isBoss) {
+        const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.006);
+        ctx.fillStyle = `rgba(255,${Math.round(60 + pulse * 100)},20,1)`;
+      } else {
+        ctx.fillStyle = s.headColor;
+      }
+      ctx.beginPath();
+      const dotR = s.isBoss ? 7 : Math.max(2.5, 3.5 * (s.radiusMul || 1));
+      ctx.arc(sx, sy, dotR, 0, Math.PI * 2);
+      ctx.fill();
+
+      rows.push({
+        name: s.isBoss ? '👑 ' + s.name : s.name,
+        length: s.length,
+        color: s.isBoss ? '#ff3c14' : s.headColor,
+        x: Math.round(s.head.x), y: Math.round(s.head.y),
+        isBoss: s.isBoss, isPlayer: false,
+      });
+    }
+
+    if (this.player && this.player.alive) {
+      const px = toX(this.player.head.x), py = toY(this.player.head.y);
+      ctx.fillStyle = '#7effb2'; ctx.shadowColor = '#7effb2'; ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(px, py, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Player's current viewport, so it's clear where on the map they
+      // actually are relative to everything else.
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.5;
+      const vw = (window.innerWidth  || 400) * scale;
+      const vh = (window.innerHeight || 800) * scale;
+      ctx.strokeRect(toX(this.camX), toY(this.camY), vw, vh);
+
+      rows.unshift({
+        name: (this.player.name || 'You') + ' (You)',
+        length: this.player.length,
+        color: '#7effb2',
+        x: Math.round(this.player.head.x), y: Math.round(this.player.head.y),
+        isBoss: false, isPlayer: true,
+      });
+    }
+
+    // Sort everyone except the player by length, longest first — the
+    // player row is pinned to the very top via unshift() above regardless
+    // of their own length, so it's always easy to find at a glance.
+    const playerRow = rows[0] && rows[0].isPlayer ? rows.shift() : null;
+    rows.sort((a, b) => b.length - a.length);
+    if (playerRow) rows.unshift(playerRow);
+
+    this._renderFullMapList(rows);
+  },
+
+  // Rebuilds the #fullmap-list DOM from the row data collected in
+  // _drawFullMap(). Kept as a full innerHTML rebuild rather than a diffed
+  // update — the list is at most ~15 rows and only re-renders while the
+  // overlay is open, so the cost is negligible and the code stays simple.
+  _renderFullMapList(rows) {
+    const list = document.getElementById('fullmap-list');
+    if (!list) return;
+
+    if (rows.length === 0) {
+      list.innerHTML = '<div class="fullmap-row">No snakes on the map</div>';
+      return;
+    }
+
+    let html = '';
+    for (const r of rows) {
+      const cls = r.isPlayer ? ' fullmap-row--player' : (r.isBoss ? ' fullmap-row--boss' : '');
+      const safeName = String(r.name).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+      html += `<div class="fullmap-row${cls}">` +
+        `<span class="fullmap-dot" style="background:${r.color}"></span>` +
+        `<span class="fullmap-row-name">${safeName}</span>` +
+        `<span class="fullmap-row-len">${r.length}</span>` +
+        `<span class="fullmap-row-pos">${r.x}, ${r.y}</span>` +
+        `</div>`;
+    }
+    list.innerHTML = html;
   }
 });

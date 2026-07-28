@@ -673,7 +673,7 @@ const _IS_MOBILE = (('ontouchstart' in window) || navigator.maxTouchPoints > 0)
 const WORLD_W       = 11000;
 const WORLD_H       = 11000;
 const FOOD_COUNT    = _IS_MOBILE ? 1500 : 2500;
-const AI_COUNT      = _IS_MOBILE ? 9   : 14;
+const AI_COUNT      = 14;
 const SEGMENT_GAP   = 8;
 const SEGMENT_R_BASE = 9;
 

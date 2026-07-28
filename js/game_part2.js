@@ -84,8 +84,10 @@ class Food {
     if (type === FOOD_TYPE.NORMAL) {
       const pool = useRainEmoji ? FOOD_RAIN_EMOJIS : FOOD_BUG_EMOJIS;
       this.emoji = pool[Math.floor(Math.random() * pool.length)];
+      this.isBug = !useRainEmoji;
     } else {
       this.emoji = null;
+      this.isBug = false;
     }
   }
 
@@ -111,13 +113,32 @@ class Food {
     if (this.type === FOOD_TYPE.NORMAL) {
       const img = EmojiIconCache.get(this.emoji);
       if (img) {
-        // Soft glow behind the emoji so it still reads clearly against
-        // busy backgrounds/biome tints, same visual weight as the old
-        // plain dot had.
-        ctx.shadowColor = this.color; ctx.shadowBlur = 6 + pulse * 5;
-        const drawSize = r * 2.6;
+        // Bug emoji (🕷️🪳🪰 etc.) skew dark/brown/black, which barely
+        // shows up against the dark game background — unlike dessert
+        // emoji (food rain) which are bright and don't need this boost.
+        // A bright halo ring behind the emoji (not just a soft shadow
+        // blur) gives it a visible "plate" to sit on regardless of the
+        // emoji's own colors, and the whole thing is drawn noticeably
+        // bigger so it doesn't get lost against the background either.
+        const isBug = this.isBug;
+        ctx.save();
+        if (isBug) {
+          ctx.shadowColor = this.color; ctx.shadowBlur = 14 + pulse * 8;
+          ctx.beginPath(); ctx.arc(sx, sy, r * 1.15, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${(0.22 + pulse * 0.12).toFixed(2)})`;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          ctx.beginPath(); ctx.arc(sx, sy, r * 0.95, 0, Math.PI * 2);
+          ctx.strokeStyle = this.color; ctx.lineWidth = 1.5;
+          ctx.globalAlpha = alpha * (0.5 + pulse * 0.3);
+          ctx.stroke();
+          ctx.globalAlpha = alpha;
+        } else {
+          ctx.shadowColor = this.color; ctx.shadowBlur = 6 + pulse * 5;
+        }
+        const drawSize = isBug ? r * 3.6 : r * 2.6;
         ctx.drawImage(img, sx - drawSize / 2, sy - drawSize / 2, drawSize, drawSize);
-        ctx.shadowBlur = 0;
+        ctx.restore();
       } else {
         // Fallback (emoji cache miss) — old plain glowing dot.
         ctx.shadowColor = this.color; ctx.shadowBlur = 8 + pulse * 6;
@@ -1069,15 +1090,29 @@ const SNAKE_SPECIES = [
     weight: 0,  scoreMul: 5.0,
   },
 ];
-const SNAKE_SPECIES_TOTAL_WEIGHT = SNAKE_SPECIES.reduce((s, sp) => s + sp.weight, 0);
+const CENTIPEDE_SPECIES = SNAKE_SPECIES.find(sp => sp.id === 'centipede');
+// Everything eligible for normal AI spawns/respawns except centipede and
+// the boss (boss already excluded via weight 0, kept out of this list
+// too for clarity). Weighted pick happens *within* this group.
+const OTHER_SPECIES = SNAKE_SPECIES.filter(sp => sp.id !== 'centipede' && sp.id !== 'titan');
+const OTHER_SPECIES_TOTAL_WEIGHT = OTHER_SPECIES.reduce((s, sp) => s + sp.weight, 0);
 
+// Exactly half of all normal AI spawns are centipedes; the other half is
+// a weighted pick across every other non-boss species (hatchling, garter,
+// viper, python, anaconda, slug, ant). A flat 50/50 coin-flip is used
+// rather than folding centipede into the same weighted pool, since with
+// ~130 total weight points a single species' weight would need constant
+// re-tuning to stay near 50% as other species' weights change — the
+// coin-flip keeps it exactly 50% regardless of how the rest are tuned.
 function pickSpecies() {
-  let r = Math.random() * SNAKE_SPECIES_TOTAL_WEIGHT;
-  for (const sp of SNAKE_SPECIES) {
+  if (Math.random() < 0.5) return CENTIPEDE_SPECIES;
+
+  let r = Math.random() * OTHER_SPECIES_TOTAL_WEIGHT;
+  for (const sp of OTHER_SPECIES) {
     r -= sp.weight;
     if (r <= 0) return sp;
   }
-  return SNAKE_SPECIES[SNAKE_SPECIES.length - 1];
+  return OTHER_SPECIES[OTHER_SPECIES.length - 1];
 }
 
 const AI_PERSONALITIES = ['aggressive', 'coward', 'hunter', 'farmer'];
