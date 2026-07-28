@@ -31,6 +31,51 @@
 'use strict';
 
 /* ─────────────────────────────────────────────────────────────
+   SAFE STORAGE — thin localStorage wrapper that never throws.
+   Some browsers/in-app webviews restrict or fully block
+   localStorage (certain privacy modes, some embedded browsers).
+   Several call sites used to call localStorage directly with no
+   try-catch — including DailyChallenge.check() which runs at
+   module-load time — so a blocked localStorage could throw during
+   script evaluation and prevent the whole game from loading at
+   all. Everything now goes through here instead, falling back to
+   an in-memory Map so the game still runs (just without persistence)
+   rather than crashing outright.
+───────────────────────────────────────────────────────────── */
+const SafeStorage = {
+  _memory: new Map(),
+  _ok: null,
+  _available() {
+    if (this._ok !== null) return this._ok;
+    try {
+      const k = '__snakeRush_test__';
+      localStorage.setItem(k, '1');
+      localStorage.removeItem(k);
+      this._ok = true;
+    } catch (_) { this._ok = false; }
+    return this._ok;
+  },
+  getItem(key) {
+    if (this._available()) {
+      try { return localStorage.getItem(key); } catch (_) { /* fall through */ }
+    }
+    return this._memory.has(key) ? this._memory.get(key) : null;
+  },
+  setItem(key, value) {
+    if (this._available()) {
+      try { localStorage.setItem(key, value); return; } catch (_) { /* fall through */ }
+    }
+    this._memory.set(key, value);
+  },
+  removeItem(key) {
+    if (this._available()) {
+      try { localStorage.removeItem(key); return; } catch (_) { /* fall through */ }
+    }
+    this._memory.delete(key);
+  },
+};
+
+/* ─────────────────────────────────────────────────────────────
    SETTINGS STORE
 ───────────────────────────────────────────────────────────── */
 const Settings = {
@@ -47,7 +92,7 @@ const Settings = {
    surprise blast of audio on load. */
 (function loadPersistedSettings() {
   try {
-    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+    const stored = JSON.parse(SafeStorage.getItem(SETTINGS_KEY) || '{}');
     if (stored.design && typeof stored.design === 'string') Settings.design = stored.design;
     if (typeof stored.sensitivity === 'number') Settings.sensitivity = stored.sensitivity;
     if (stored.mode === 'classic' || stored.mode === 'timetrial') Settings.mode = stored.mode;
@@ -56,7 +101,7 @@ const Settings = {
 
 function savePersistedSettings() {
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+    SafeStorage.setItem(SETTINGS_KEY, JSON.stringify({
       design: Settings.design, sensitivity: Settings.sensitivity, mode: Settings.mode,
     }));
   } catch(_) {}
@@ -82,12 +127,12 @@ const HighScore = {
   _cached: null,
   get() {
     if (this._cached === null)
-      this._cached = parseInt(localStorage.getItem(HS_KEY) || '0', 10);
+      this._cached = parseInt(SafeStorage.getItem(HS_KEY) || '0', 10);
     return this._cached;
   },
   save(n) {
     const c = this.get();
-    if (n > c) { localStorage.setItem(HS_KEY, String(n)); this._cached = n; }
+    if (n > c) { SafeStorage.setItem(HS_KEY, String(n)); this._cached = n; }
     return this._cached;
   },
 };
@@ -106,7 +151,7 @@ const Profile = {
   },
   get() {
     if (!this._data) {
-      try { this._data = JSON.parse(localStorage.getItem(PROFILE_KEY)) || this._defaults(); }
+      try { this._data = JSON.parse(SafeStorage.getItem(PROFILE_KEY)) || this._defaults(); }
       catch(_) { this._data = this._defaults(); }
       // fill missing keys
       const d = this._defaults();
@@ -117,7 +162,7 @@ const Profile = {
     return this._data;
   },
   save() {
-    try { localStorage.setItem(PROFILE_KEY, JSON.stringify(this._data)); } catch(_) {}
+    try { SafeStorage.setItem(PROFILE_KEY, JSON.stringify(this._data)); } catch(_) {}
   },
   add(key, val = 1) { this.get()[key] += val; this.save(); },
   set(key, val) { this.get()[key] = val; this.save(); },
@@ -156,10 +201,10 @@ const DailyChallenge = {
 
   check() {
     const today = new Date().toDateString();
-    const stored = localStorage.getItem(DAILY_DATE_KEY);
+    const stored = SafeStorage.getItem(DAILY_DATE_KEY);
     if (stored !== today) {
-      localStorage.setItem(DAILY_DATE_KEY, today);
-      localStorage.removeItem(DAILY_SCORE_KEY);
+      SafeStorage.setItem(DAILY_DATE_KEY, today);
+      SafeStorage.removeItem(DAILY_SCORE_KEY);
     }
     // generate today's seed-based parameters
     const rng = mulberry32(hashStr(today));
@@ -172,8 +217,8 @@ const DailyChallenge = {
   },
 
   saveBest(score) {
-    const prev = parseInt(localStorage.getItem(DAILY_SCORE_KEY) || '0', 10);
-    if (score > prev) localStorage.setItem(DAILY_SCORE_KEY, String(score));
+    const prev = parseInt(SafeStorage.getItem(DAILY_SCORE_KEY) || '0', 10);
+    if (score > prev) SafeStorage.setItem(DAILY_SCORE_KEY, String(score));
   },
 };
 DailyChallenge.check();
@@ -199,16 +244,16 @@ function generateName(rng = Math.random.bind(Math)) {
 }
 
 function getPlayerName() {
-  let name = localStorage.getItem(PLAYER_NAME_KEY);
+  let name = SafeStorage.getItem(PLAYER_NAME_KEY);
   if (!name) {
     name = generateName();
-    localStorage.setItem(PLAYER_NAME_KEY, name);
+    SafeStorage.setItem(PLAYER_NAME_KEY, name);
   }
   return name;
 }
 
 function setPlayerName(name) {
-  localStorage.setItem(PLAYER_NAME_KEY, name.trim() || generateName());
+  SafeStorage.setItem(PLAYER_NAME_KEY, name.trim() || generateName());
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -380,6 +425,10 @@ class AchievementManager {
     this._unlocked = new Set();
     this._toasts   = [];
     this._load();
+    // Catch up any skins tied to achievements already unlocked before this
+    // check existed (or before the player earned them) — see
+    // SkinSystem.syncWithAchievements for why this is needed.
+    if (typeof SkinSystem !== 'undefined') SkinSystem.syncWithAchievements(this._unlocked);
 
     // Per-run counters
     this.runKills       = 0;
@@ -391,14 +440,14 @@ class AchievementManager {
 
   _load() {
     try {
-      const data = JSON.parse(localStorage.getItem(ACHIEVEMENTS_KEY) || '[]');
+      const data = JSON.parse(SafeStorage.getItem(ACHIEVEMENTS_KEY) || '[]');
       this._unlocked = new Set(data);
     } catch(_) { this._unlocked = new Set(); }
   }
 
   _save() {
     try {
-      localStorage.setItem(ACHIEVEMENTS_KEY, JSON.stringify([...this._unlocked]));
+      SafeStorage.setItem(ACHIEVEMENTS_KEY, JSON.stringify([...this._unlocked]));
     } catch(_) {}
   }
 
@@ -411,6 +460,7 @@ class AchievementManager {
     this._unlocked.add(id);
     this._save();
     this._toasts.push({ name: def.name, age: 0, life: 3.5 });
+    Haptics.achievement();
     // Update overlay count
     const el = document.getElementById('achievement-count');
     if (el) el.textContent = `${this._unlocked.size} / ${ACHIEVEMENTS_DEF.length}`;
@@ -732,7 +782,7 @@ const SkinSystem = {
   _load() {
     if (this._unlocked) return this._unlocked;
     try {
-      const stored = JSON.parse(localStorage.getItem(SKINS_KEY) || '[]');
+      const stored = JSON.parse(SafeStorage.getItem(SKINS_KEY) || '[]');
       this._unlocked = new Set(stored);
     } catch(_) { this._unlocked = new Set(); }
     // Free skins are always unlocked, even on a fresh profile.
@@ -741,7 +791,7 @@ const SkinSystem = {
   },
 
   _save() {
-    try { localStorage.setItem(SKINS_KEY, JSON.stringify([...this._unlocked])); } catch(_) {}
+    try { SafeStorage.setItem(SKINS_KEY, JSON.stringify([...this._unlocked])); } catch(_) {}
   },
 
   isUnlocked(id) { return this._load().has(id); },
@@ -769,6 +819,26 @@ const SkinSystem = {
         if (this.unlock(s.id)) this._announce(s);
       }
     }
+  },
+
+  // Retroactive sync: AchievementManager.unlock() early-returns when an
+  // achievement is already unlocked, so it never re-fires checkAchievement
+  // for achievements a player had already earned before a new skin was
+  // tied to them (or before this skin system existed at all). Without
+  // this, those players would need to somehow trigger the achievement's
+  // "first time" condition again — e.g. get a "first" kill despite
+  // already having 50 — which is effectively impossible. Called once at
+  // startup against whatever achievements are already unlocked. Silent
+  // (no toast) since this isn't a new accomplishment, just catching up
+  // bookkeeping that should've already been in sync.
+  syncWithAchievements(unlockedAchievementIds) {
+    let changed = false;
+    for (const s of SKINS_DEF) {
+      if (s.unlock && s.unlock.type === 'achievement' && unlockedAchievementIds.has(s.unlock.id)) {
+        if (this.unlock(s.id)) changed = true;
+      }
+    }
+    return changed;
   },
 
   _announce(skin) {
@@ -847,6 +917,26 @@ class Vector2 {
 /* ─────────────────────────────────────────────────────────────
    1b. AUDIO MANAGER
 ───────────────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────
+   HAPTICS — short vibration bursts for key moments (kill, death,
+   powerup, hit). Mobile-only in practice (navigator.vibrate isn't
+   supported on iOS Safari or desktop Chrome), and always no-ops
+   safely where unsupported rather than throwing.
+───────────────────────────────────────────────────────────── */
+const Haptics = {
+  _supported: typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function',
+  _pattern(p) {
+    if (!this._supported) return;
+    try { navigator.vibrate(p); } catch (_) {}
+  },
+  eat()       { this._pattern(8); },
+  powerup()   { this._pattern([10, 30, 10]); },
+  kill()      { this._pattern([15, 40, 15]); },
+  hit()       { this._pattern(35); },
+  death()     { this._pattern([60, 60, 90]); },
+  achievement(){ this._pattern([10, 20, 10, 20, 25]); },
+};
+
 class AudioManager {
   constructor() {
     this._ctx = null;

@@ -48,6 +48,10 @@ class Game {
     this.combo     = new ComboManager();
     this.shake     = new ScreenShake();
     this.achievements = new AchievementManager();
+    // Defensive: also sync score-gated skins against the player's existing
+    // best score at startup, in case a previous best was set before this
+    // skin was added or checkScore() otherwise wasn't called for it.
+    SkinSystem.checkScore(Profile.get().bestScore);
 
     this._lastTime     = 0;
     this._rafId        = null;
@@ -250,6 +254,9 @@ class Game {
     }
     if (this.resumeBtn)  this.resumeBtn.addEventListener('click', () => this.resumeGame());
     if (this.restartBtn) this.restartBtn.addEventListener('click', () => this.restartGame());
+
+    const shareBtn = document.getElementById('share-score-btn');
+    if (shareBtn) shareBtn.addEventListener('click', () => this._shareScore());
     if (this.exitBtn)    this.exitBtn.addEventListener('click', () => this.exitToMenu());
 
     // Auto-pause when the tab/app goes into the background, so the snake
@@ -444,8 +451,49 @@ class Game {
         Settings.mode = btn.dataset.mode;
         if (modeDescEl) modeDescEl.textContent = modeDescs[Settings.mode] || '';
         savePersistedSettings();
+        // Daily Challenge only applies to Classic — switching to Time
+        // Trial turns it off rather than leaving a stale/contradictory
+        // toggle state.
+        if (Settings.mode !== 'classic' && DailyChallenge.isActive) {
+          DailyChallenge.isActive = false;
+          const dt = document.getElementById('daily-toggle');
+          const db = document.getElementById('daily-badge');
+          if (dt) dt.setAttribute('aria-pressed', 'false');
+          if (db) db.classList.add('hidden');
+        }
       });
     });
+
+    // Daily Challenge toggle — a seeded modifier on top of Classic mode.
+    // This is the only UI entry point for DailyChallenge.isActive; without
+    // it the whole daily-challenge system (seeded AI/food/world/power-ups)
+    // was unreachable regardless of how complete the backend logic was.
+    const dailyToggle = document.getElementById('daily-toggle');
+    const dailyBadge  = document.getElementById('daily-badge');
+    if (dailyToggle) {
+      const dailySub = document.getElementById('daily-toggle-sub');
+      const bestToday = parseInt(SafeStorage.getItem(DAILY_SCORE_KEY) || '0', 10);
+      if (dailySub && bestToday > 0) dailySub.textContent = `Today's best: ${bestToday} — tap to play`;
+
+      dailyToggle.addEventListener('click', () => {
+        DailyChallenge.isActive = !DailyChallenge.isActive;
+        dailyToggle.setAttribute('aria-pressed', String(DailyChallenge.isActive));
+        if (dailyBadge) dailyBadge.classList.toggle('hidden', !DailyChallenge.isActive);
+        // Daily Challenge only makes sense on Classic (seeded AI count/
+        // food/world size) — switch back to Classic if Time Trial was
+        // selected, since a "daily time trial" isn't a defined mode.
+        if (DailyChallenge.isActive && Settings.mode !== 'classic') {
+          modeBtns.forEach(b => b.classList.toggle('active', b.dataset.mode === 'classic'));
+          Settings.mode = 'classic';
+          savePersistedSettings();
+        }
+        if (modeDescEl) {
+          modeDescEl.textContent = DailyChallenge.isActive
+            ? `Today's seed: ${DailyChallenge.aiCount} AI snakes, ${DailyChallenge.foodCount} food. Same for everyone today.`
+            : modeDescs[Settings.mode] || '';
+        }
+      });
+    }
 
     // Gyro toggle — only show on touch devices
     if ('ontouchstart' in window) {
@@ -889,27 +937,27 @@ class Game {
 
         if (isPlayer) {
           if (food.type === FOOD_TYPE.MAGNET) {
-            this.player.activateMagnet(); this.audio.playMagnet();
+            this.player.activateMagnet(); this.audio.playMagnet(); Haptics.powerup();
             eaten.push(food); this._spawnFood(FOOD_TYPE.NORMAL); continue;
           }
           if (food.type === FOOD_TYPE.ATTACK) {
-            this.player.activateAttack();
+            this.player.activateAttack(); Haptics.powerup();
             eaten.push(food); this._spawnFood(FOOD_TYPE.NORMAL); continue;
           }
           if (food.type === FOOD_TYPE.SHIELD) {
-            this.player.activateShield(); this.audio.playMagnet();
+            this.player.activateShield(); this.audio.playMagnet(); Haptics.powerup();
             eaten.push(food); this._spawnFood(FOOD_TYPE.NORMAL); continue;
           }
           if (food.type === FOOD_TYPE.GHOST) {
-            this.player.activateGhost(); this.audio.playMagnet();
+            this.player.activateGhost(); this.audio.playMagnet(); Haptics.powerup();
             eaten.push(food); this._spawnFood(FOOD_TYPE.NORMAL); continue;
           }
           if (food.type === FOOD_TYPE.MINE) {
-            this.player.activateMine(); this.audio.playMagnet();
+            this.player.activateMine(); this.audio.playMagnet(); Haptics.powerup();
             eaten.push(food); this._spawnFood(FOOD_TYPE.NORMAL); continue;
           }
           if (food.type === FOOD_TYPE.SPEED) {
-            this.player.activateSpeedBoost(); this.audio.playMagnet();
+            this.player.activateSpeedBoost(); this.audio.playMagnet(); Haptics.powerup();
             this.achievements.onSpeedBoost();
             eaten.push(food); this._spawnFood(FOOD_TYPE.NORMAL); continue;
           }
@@ -918,6 +966,7 @@ class Game {
               this.player.lives++;
               this._updateLivesHUD();
               this.audio.playLifeline();
+              Haptics.powerup();
               eaten.push(food);
             }
             continue;
@@ -1184,6 +1233,106 @@ class Game {
     document.body.classList.add('life-lost-flash');
   }
 
+  // Builds a shareable result card (dark theme, matches the game's look)
+  // on an offscreen canvas, then shares it as an image via the Web Share
+  // API where supported (native share sheet — most mobile browsers can
+  // attach it to Instagram/WhatsApp/etc directly), falling back to a
+  // plain download on desktop or unsupported browsers.
+  async _shareScore() {
+    const score  = this._lastRunScore  ?? this.player.score;
+    const length = this._lastRunLength ?? this.player.length;
+    const name   = this.player.name || getPlayerName();
+    const mode   = this._mode === 'timetrial' ? 'Time Trial' : (DailyChallenge.isActive ? 'Daily Challenge' : 'Classic');
+
+    const W = 800, H = 800;
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+
+    // Background — deep space gradient matching the game's theme
+    const bg = ctx.createRadialGradient(W / 2, H * 0.4, 40, W / 2, H * 0.4, W * 0.8);
+    bg.addColorStop(0, '#0d2a20');
+    bg.addColorStop(1, '#050a08');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // Subtle dot grid, echoing the in-game background
+    ctx.fillStyle = 'rgba(126, 255, 178, 0.08)';
+    for (let x = 20; x < W; x += 40) {
+      for (let y = 20; y < H; y += 40) {
+        ctx.beginPath(); ctx.arc(x, y, 1.4, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
+    // Snake motif — a short curved multicolour body, decorative only
+    const pal = MULTICOLOUR_PALETTE;
+    const cx = W / 2, cy = 190, segR = 22;
+    ctx.save();
+    for (let i = 14; i >= 0; i--) {
+      const t = i / 14;
+      const sx = cx - 220 + t * 440;
+      const sy = cy + Math.sin(t * Math.PI) * -60;
+      ctx.beginPath();
+      ctx.arc(sx, sy, segR, 0, Math.PI * 2);
+      ctx.fillStyle = pal[i % pal.length];
+      ctx.fill();
+    }
+    ctx.restore();
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#eafff5';
+    ctx.font = '700 30px sans-serif';
+    ctx.fillText('🐍 SNAKE RUSH', W / 2, 330);
+
+    ctx.font = '800 96px sans-serif';
+    ctx.fillStyle = '#7effb2';
+    ctx.shadowColor = 'rgba(126,255,178,0.6)';
+    ctx.shadowBlur = 24;
+    ctx.fillText(String(score), W / 2, 460);
+    ctx.shadowBlur = 0;
+
+    ctx.font = '600 24px sans-serif';
+    ctx.fillStyle = '#9db8ab';
+    ctx.fillText('SCORE', W / 2, 495);
+
+    ctx.font = '600 26px sans-serif';
+    ctx.fillStyle = '#cfe8db';
+    ctx.fillText(`${name}  •  Length ${length}  •  ${mode}`, W / 2, 560);
+
+    ctx.font = '500 20px sans-serif';
+    ctx.fillStyle = '#6b8a7a';
+    ctx.fillText('snakerushgame.vercel.app', W / 2, 720);
+
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const file = new File([blob], 'snake-rush-score.png', { type: 'image/png' });
+
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: 'Snake Rush',
+            text: `I scored ${score} in Snake Rush! Can you beat it?`,
+          });
+          return;
+        } catch (_) {
+          // User cancelled the share sheet or it failed — fall through
+          // to download so they still get the image.
+        }
+      }
+
+      // Fallback: plain download (desktop browsers, or share unsupported)
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'snake-rush-score.png';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }, 'image/png');
+  }
+
   _respawnPlayer() {
     const p = this.player;
     const W = this._worldW, H = this._worldH;
@@ -1226,6 +1375,7 @@ class Game {
         this.particles.burst(snake.segments, snake.headColor);
         this.audio.playGameOver();
         this.shake.trigger(12, 0.4);
+        Haptics.death();
         this.achievements.onDeath();
         this._runGameOver();
         return;
@@ -1235,6 +1385,7 @@ class Game {
       this._updateLivesHUD();
       this._flashLifeLost();
       this.shake.trigger(12, 0.4);
+      Haptics.death();
       this.achievements.onDeath();
       Profile.add('totalDeaths');
 
@@ -1260,6 +1411,7 @@ class Game {
       if (triggeredByPlayer) {
         this.audio.playBossKill();
         this._hitStopTimer = 0.12;
+        Haptics.kill();
         this.killFeed.add('🏆 You slew the Titan Serpent!');
         // Direct score bonus on top of the food it drops below — killing
         // a boss should feel like a headline event, not just "one more
@@ -1276,6 +1428,7 @@ class Game {
       if (triggeredByPlayer) {
         this.audio.playKill();
         this._hitStopTimer = 0.08;
+        Haptics.kill();
         const label = snake.speciesLabel ? `${snake.speciesLabel} ${snake.name || ''}`.trim() : (snake.name || 'Unknown');
         this.killFeed.addKill(label);
         Profile.add('totalKills');
@@ -1426,6 +1579,7 @@ class Game {
             shatterList.push({ snake: sb, fromIndex: s, byPlayer: sa === this.player });
           } else if (sb === this.player && sa !== this.player) {
             this.audio.playEnemyBite();
+            Haptics.hit();
             killSet.add(sa);
           } else {
             killSet.add(sa);
@@ -1443,6 +1597,7 @@ class Game {
             shatterList.push({ snake: sa, fromIndex: s, byPlayer: sb === this.player });
           } else if (sa === this.player && sb !== this.player) {
             this.audio.playEnemyBite();
+            Haptics.hit();
             killSet.add(sb);
           } else {
             killSet.add(sb);
@@ -1492,8 +1647,8 @@ class Game {
 
     if (DailyChallenge.isActive) DailyChallenge.saveBest(score);
     if (this._mode === 'timetrial') {
-      const prevBest = parseInt(localStorage.getItem(TT_KEY) || '0', 10);
-      if (score > prevBest) localStorage.setItem(TT_KEY, String(score));
+      const prevBest = parseInt(SafeStorage.getItem(TT_KEY) || '0', 10);
+      if (score > prevBest) SafeStorage.setItem(TT_KEY, String(score));
       const profBest = Profile.get();
       if (score > profBest.bestScoreTimeTrial) { profBest.bestScoreTimeTrial = score; Profile.save(); }
     }
@@ -1506,6 +1661,8 @@ class Game {
       if (bestDisplay) bestDisplay.style.display = 'block';
       this.scoreDisplay.style.display = 'block';
       this.overlay.classList.remove('hidden');
+      this._lastRunScore  = score;
+      this._lastRunLength = this.player.length;
     });
   }
 
@@ -1515,8 +1672,8 @@ class Game {
     this.audio.playGameOver();
 
     const score = this.player.score;
-    const prevBest = parseInt(localStorage.getItem(TT_KEY) || '0', 10);
-    if (score > prevBest) localStorage.setItem(TT_KEY, String(score));
+    const prevBest = parseInt(SafeStorage.getItem(TT_KEY) || '0', 10);
+    if (score > prevBest) SafeStorage.setItem(TT_KEY, String(score));
     const p = Profile.get();
     if (score > p.bestScoreTimeTrial) { p.bestScoreTimeTrial = score; Profile.save(); }
 
@@ -1530,6 +1687,8 @@ class Game {
     if (bestDisplay) bestDisplay.style.display = 'block';
     this.scoreDisplay.style.display = 'block';
     this.overlay.classList.remove('hidden');
+    this._lastRunScore  = score;
+    this._lastRunLength = this.player.length;
   }
 
   /* ── DEATH CINEMATIC ────────────────────────────────────── */
