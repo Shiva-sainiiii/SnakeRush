@@ -51,10 +51,12 @@ const FOOD_TYPE = Object.freeze({
   GHOST:    'ghost',
   MINE:     'mine',
   SPEED:    'speed',
+  FIRE:     'fire',
+  FREEZE:   'freeze',
 });
 
 class Food {
-  constructor(x, y, color, type = FOOD_TYPE.NORMAL, ttl = null) {
+  constructor(x, y, color, type = FOOD_TYPE.NORMAL, ttl = null, useRainEmoji = false) {
     this.pos    = new Vector2(x, y);
     this.type   = type;
     this.radius = type === FOOD_TYPE.NORMAL ? 6 : 9;
@@ -69,8 +71,22 @@ class Food {
       [FOOD_TYPE.GHOST]:    '#c8a0ff',
       [FOOD_TYPE.MINE]:     '#ff9f40',
       [FOOD_TYPE.SPEED]:    '#ffff80',
+      [FOOD_TYPE.FIRE]:     '#ff5a1f',
+      [FOOD_TYPE.FREEZE]:   '#7fdfff',
     };
     this.color = colors[type] || color;
+
+    // Cosmetic emoji drawn on top of normal food — a random bug normally,
+    // or a random dessert when spawned as part of a Food Rain event.
+    // Picked once here and cached rather than per-frame so a given food
+    // item keeps the same look for its whole lifetime instead of
+    // flickering between bugs every draw call.
+    if (type === FOOD_TYPE.NORMAL) {
+      const pool = useRainEmoji ? FOOD_RAIN_EMOJIS : FOOD_BUG_EMOJIS;
+      this.emoji = pool[Math.floor(Math.random() * pool.length)];
+    } else {
+      this.emoji = null;
+    }
   }
 
   get expired() { return this.ttl !== null && this.ttl <= 0; }
@@ -93,12 +109,24 @@ class Food {
     ctx.globalAlpha = alpha;
 
     if (this.type === FOOD_TYPE.NORMAL) {
-      ctx.shadowColor = this.color; ctx.shadowBlur = 8 + pulse * 6;
-      ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2);
-      ctx.fillStyle = this.color; ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.beginPath(); ctx.arc(sx, sy, r * 0.45, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fill();
+      const img = EmojiIconCache.get(this.emoji);
+      if (img) {
+        // Soft glow behind the emoji so it still reads clearly against
+        // busy backgrounds/biome tints, same visual weight as the old
+        // plain dot had.
+        ctx.shadowColor = this.color; ctx.shadowBlur = 6 + pulse * 5;
+        const drawSize = r * 2.6;
+        ctx.drawImage(img, sx - drawSize / 2, sy - drawSize / 2, drawSize, drawSize);
+        ctx.shadowBlur = 0;
+      } else {
+        // Fallback (emoji cache miss) — old plain glowing dot.
+        ctx.shadowColor = this.color; ctx.shadowBlur = 8 + pulse * 6;
+        ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2);
+        ctx.fillStyle = this.color; ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.beginPath(); ctx.arc(sx, sy, r * 0.45, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fill();
+      }
 
     } else if (this.type === FOOD_TYPE.MAGNET) {
       const spin = Date.now() * 0.003;
@@ -206,6 +234,40 @@ class Food {
       ctx.font = `bold ${Math.round(r * 1.2)}px sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText('⚡', sx, sy + 1);
+      ctx.restore();
+
+    } else if (this.type === FOOD_TYPE.FIRE) {
+      // Debuff food — visually reads "danger" via a hot red/orange glow,
+      // distinct from the cooler power-up colors above.
+      ctx.shadowColor = '#ff5a1f'; ctx.shadowBlur = 20 + pulse * 14;
+      ctx.beginPath(); ctx.arc(sx, sy, r + 4, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,90,31,${(0.35 + pulse * 0.35).toFixed(2)})`;
+      ctx.lineWidth = 2; ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fillStyle = '#c62800'; ctx.fill();
+      ctx.save();
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold ${Math.round(r * 1.2)}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('🌶️', sx, sy + 1);
+      ctx.restore();
+
+    } else if (this.type === FOOD_TYPE.FREEZE) {
+      // Debuff food — cold blue/white glow signals "this will slow you
+      // down", mirroring FIRE's hot glow for the opposite debuff.
+      ctx.shadowColor = '#7fdfff'; ctx.shadowBlur = 20 + pulse * 14;
+      ctx.beginPath(); ctx.arc(sx, sy, r + 4, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(127,223,255,${(0.35 + pulse * 0.35).toFixed(2)})`;
+      ctx.lineWidth = 2; ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fillStyle = '#2a9fd6'; ctx.fill();
+      ctx.save();
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold ${Math.round(r * 1.2)}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('🧊', sx, sy + 1);
       ctx.restore();
     }
 
@@ -629,6 +691,45 @@ class Snake {
       ctx.restore();
     }
 
+    // Frozen aura — player-only debuff visual: icy rings around the head
+    // plus a light frost tint wash over the whole body, so "you are
+    // frozen and cannot move" reads clearly at a glance, not just via a
+    // stopped snake that might look like lag.
+    if (this.isPlayer && this.freezeTimer > 0) {
+      const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.008);
+      ctx.save();
+      ctx.strokeStyle = `rgba(127,223,255,${(0.5 + pulse * 0.35).toFixed(2)})`;
+      ctx.lineWidth = 3; ctx.shadowColor = '#7fdfff'; ctx.shadowBlur = 20;
+      ctx.beginPath(); ctx.arc(hx, hy, segR * 2.0 + pulse * 3, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+
+      ctx.save();
+      ctx.globalAlpha = 0.22;
+      ctx.beginPath();
+      for (let i = len - 1; i >= 0; i--) {
+        const sx = segs[i].x - camX, sy = segs[i].y - camY;
+        if (sx < -segR * 2 || sx > _logW + segR * 2 || sy < -segR * 2 || sy > _logH + segR * 2) continue;
+        ctx.moveTo(sx + segR, sy);
+        ctx.arc(sx, sy, segR * 1.1, 0, Math.PI * 2);
+      }
+      ctx.fillStyle = '#bff2ff';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Fire flash — brief red pulse right after eating 🌶️, so the instant
+    // length loss reads as "that hurt" instead of segments silently
+    // vanishing off the tail unnoticed.
+    if (this.isPlayer && this.fireFlashTimer > 0) {
+      const t = this.fireFlashTimer / 0.5; // 1 -> 0 over the flash duration
+      ctx.save();
+      ctx.globalAlpha = t * 0.5;
+      ctx.strokeStyle = '#ff5a1f';
+      ctx.lineWidth = 4; ctx.shadowColor = '#ff5a1f'; ctx.shadowBlur = 22;
+      ctx.beginPath(); ctx.arc(hx, hy, segR * 2.2 + (1 - t) * 10, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+
     // Boss aura — a slow pulsing red/gold double ring so the Titan Serpent
     // reads as a threat from a distance. Only ever one boss on screen at a
     // time, so this is negligible extra draw cost.
@@ -769,6 +870,15 @@ class PlayerSnake extends Snake {
     this.ghostTimer     = 0;
     this.mineTimer      = 0;
     this.speedBoostTimer = 0;
+    // 🧊 Freeze debuff — while > 0 the player can't move (speed forced to
+    // 0) and gets the chilled visual treatment in draw(). Separate from
+    // shieldTimer/ghostTimer etc. since it's a penalty, not a power-up.
+    this.freezeTimer    = 0;
+    // 🌶️ Fire debuff — no ongoing timer needed (the length loss is instant,
+    // applied once on pickup), but this drives a brief flash/particle beat
+    // right after eating so the shrink reads as "ouch" rather than silently
+    // losing segments unnoticed.
+    this.fireFlashTimer = 0;
 
     this._mineDeployAcc  = 0;
     this.activeMines     = [];  // Mine objects
@@ -789,6 +899,8 @@ class PlayerSnake extends Snake {
     if (this.ghostTimer    > 0) this.ghostTimer    = Math.max(0, this.ghostTimer    - dt);
     if (this.speedBoostTimer > 0) this.speedBoostTimer = Math.max(0, this.speedBoostTimer - dt);
     if (this.mineTimer     > 0) this.mineTimer     = Math.max(0, this.mineTimer     - dt);
+    if (this.freezeTimer   > 0) this.freezeTimer   = Math.max(0, this.freezeTimer   - dt);
+    if (this.fireFlashTimer > 0) this.fireFlashTimer = Math.max(0, this.fireFlashTimer - dt);
 
     // Mine deployment
     if (this.mineTimer > 0 && this.activeMines.length < MINE_MAX) {
@@ -802,12 +914,19 @@ class PlayerSnake extends Snake {
     for (const m of this.activeMines) m.update(dt);
     this.activeMines = this.activeMines.filter(m => !m.expired);
 
-    const speedMul = this.speedBoostTimer > 0 ? SPEED_BOOST_MUL : 1;
-    const scaledBase  = this._calcSpeed(BASE_SPEED  * speedMul);
-    const scaledBoost = this._calcSpeed(BOOST_SPEED * speedMul);
-    this.speed = (this.boosting && this.segments.length > 6) ? scaledBoost : scaledBase;
+    // Frozen solid — completely overrides normal speed calc below (still
+    // lets steering update so the player isn't stuck facing one direction
+    // when the freeze ends, they just can't actually travel meanwhile).
+    if (this.freezeTimer > 0) {
+      this.speed = 0;
+    } else {
+      const speedMul = this.speedBoostTimer > 0 ? SPEED_BOOST_MUL : 1;
+      const scaledBase  = this._calcSpeed(BASE_SPEED  * speedMul);
+      const scaledBoost = this._calcSpeed(BOOST_SPEED * speedMul);
+      this.speed = (this.boosting && this.segments.length > 6) ? scaledBoost : scaledBase;
+    }
 
-    if (this.boosting && this.segments.length > 6 && this.speedBoostTimer <= 0) {
+    if (this.freezeTimer <= 0 && this.boosting && this.segments.length > 6 && this.speedBoostTimer <= 0) {
       this._boostDrainAcc += BOOST_DRAIN * dt;
       const toRemove = Math.floor(this._boostDrainAcc);
       if (toRemove > 0) { this.shrink(toRemove); this._boostDrainAcc -= toRemove; }
@@ -847,9 +966,23 @@ class PlayerSnake extends Snake {
   activateGhost()      { this.ghostTimer    = GHOST_DURATION; }
   activateMine()       { this.mineTimer = MINE_DURATION; this._mineDeployAcc = MINE_DEPLOY_INTERVAL; }
   activateSpeedBoost() { this.speedBoostTimer = SPEED_BOOST_DURATION; }
+  // 🧊 Debuff — locks speed to 0 for FREEZE_DURATION seconds (see update()).
+  // Immunity/shield doesn't block this — it's a food pickup, not an attack,
+  // same as how shield doesn't stop the player from eating FIRE either.
+  activateFreeze()      { this.freezeTimer = FREEZE_DURATION; }
+  // 🌶️ Debuff — removes a percentage of current length immediately.
+  // Floors at 5 segments (same safety floor as shrink() already enforces)
+  // so eating fire food can never be an instant-death exploit for a very
+  // short/young snake.
+  activateFireDebuff() {
+    const loseCount = Math.ceil(this.segments.length * FIRE_SHRINK_FRACTION);
+    this.shrink(loseCount);
+    this.fireFlashTimer = 0.5;
+  }
 
   get invincible() { return this.iFrameTimer > 0 || this.shieldTimer > 0; }
   get isGhost()    { return this.ghostTimer > 0; }
+  get isFrozen()   { return this.freezeTimer > 0; }
 }
 
 /* ─────────────────────────────────────────────────────────────
