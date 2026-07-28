@@ -768,12 +768,13 @@ const FREEZE_DURATION        = 2.5;  // 🧊 seconds the player is frozen solid
 // Normal food is skinned as a random creepy-crawly instead of a plain
 // dot — purely cosmetic, picked once per food item and kept fixed for
 // its lifetime (so it doesn't flicker between bugs every frame).
-const FOOD_BUG_EMOJIS = ['🕷️', '🪳', '🪰', '🐝', '🐞', '🦟', '🪲', '🦗', '🐜', '🦂', '🦀'];
+const FOOD_BUG_EMOJIS = ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚪', '🟥', '🟧', '🟨'];
+ 
 
 // During the Food Rain event, normal food spawns as a dessert instead of
 // a bug — reads as a "treat shower" rather than more bugs falling from
 // the sky.
-const FOOD_RAIN_EMOJIS = ['🍭', '🍰', '🍕', '🍔', '🥪', '🍓', '🍊', '🍎', '🥭', '🧀', '🍐'];
+const FOOD_RAIN_EMOJIS =['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚪', '🟥', '🟧', '🟨'];
 
 const NEAR_SNAKE_RADIUS  = 100;
 const DANGER_ZONE_DIST   = 250;
