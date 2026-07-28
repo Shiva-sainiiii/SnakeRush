@@ -749,11 +749,31 @@ const SHIELD_SPAWN_RATE      = 0.003;
 const GHOST_SPAWN_RATE       = 0.003;
 const MINE_SPAWN_RATE        = 0.003;
 const SPEED_SPAWN_RATE       = 0.003;
+// Debuff foods — unlike the power-ups above, these are bad for whoever
+// eats them (player only reacts to these; AI treats them as generic food,
+// same fallback as other power-up types AI doesn't special-case).
+const FIRE_SPAWN_RATE        = 0.0035;
+const FREEZE_SPAWN_RATE      = 0.0035;
 const LIFELINE_MAX_ON_MAP    = 1;
 const SHIELD_MAX_ON_MAP      = 1;
 const GHOST_MAX_ON_MAP       = 1;
 const MINE_MAX_ON_MAP        = 1;
 const SPEED_MAX_ON_MAP       = 1;
+const FIRE_MAX_ON_MAP        = 1;
+const FREEZE_MAX_ON_MAP      = 1;
+
+const FIRE_SHRINK_FRACTION   = 0.05; // 🌶️ removes 5% of current length
+const FREEZE_DURATION        = 2.5;  // 🧊 seconds the player is frozen solid
+
+// Normal food is skinned as a random creepy-crawly instead of a plain
+// dot — purely cosmetic, picked once per food item and kept fixed for
+// its lifetime (so it doesn't flicker between bugs every frame).
+const FOOD_BUG_EMOJIS = ['🕷️', '🪳', '🪰', '🐝', '🐞', '🦟', '🪲', '🦗', '🐜', '🦂', '🦀'];
+
+// During the Food Rain event, normal food spawns as a dessert instead of
+// a bug — reads as a "treat shower" rather than more bugs falling from
+// the sky.
+const FOOD_RAIN_EMOJIS = ['🍭', '🍰', '🍕', '🍔', '🥪', '🍓', '🍊', '🍎', '🥭', '🧀', '🍐'];
 
 const NEAR_SNAKE_RADIUS  = 100;
 const DANGER_ZONE_DIST   = 250;
@@ -1026,7 +1046,6 @@ class AudioManager {
   lifeline:  'assets/lifeline.mp3',
   bossroar:  'assets/bossroar.mp3',
   bosskill:  'assets/bosskill.mp3',
-  
 };
     const unlock = () => {
       this._init();
