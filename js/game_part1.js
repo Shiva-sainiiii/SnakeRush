@@ -1026,7 +1026,7 @@ class AudioManager {
   lifeline:  'assets/lifeline.mp3',
   bossroar:  'assets/bossroar.mp3',
   bosskill:  'assets/bosskill.mp3',
-  cow: 'assets/cow.mp3',
+  
 };
     const unlock = () => {
       this._init();
