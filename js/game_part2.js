@@ -566,16 +566,25 @@ class Snake {
       ctx.fill();
     }
 
+    // Emoji face — player reads live from Settings (so switching in the
+    // settings modal mid-run updates instantly), AI snakes use whatever
+    // was randomly assigned to them at spawn. When active, it fully
+    // replaces the colored head circle (not just the eyes) — the emoji
+    // becomes the head.
+    const activeFace = this.isPlayer ? Settings.face : this.face;
+
     // Head
     const hx = segs[0].x - camX, hy = segs[0].y - camY;
-    ctx.save();
-    ctx.shadowColor = glowColor;
-    ctx.shadowBlur  = inAttack ? 28 : (inShield ? 22 : (inSpeed ? 20 : 16));
-    ctx.beginPath();
-    ctx.arc(hx, hy, segR * 1.35, 0, Math.PI * 2);
-    ctx.fillStyle = headFill;
-    ctx.fill();
-    ctx.restore();
+    if (!activeFace) {
+      ctx.save();
+      ctx.shadowColor = glowColor;
+      ctx.shadowBlur  = inAttack ? 28 : (inShield ? 22 : (inSpeed ? 20 : 16));
+      ctx.beginPath();
+      ctx.arc(hx, hy, segR * 1.35, 0, Math.PI * 2);
+      ctx.fillStyle = headFill;
+      ctx.fill();
+      ctx.restore();
+    }
 
     // Attack ring
     if (inAttack) {
@@ -626,12 +635,7 @@ class Snake {
       ctx.restore();
     }
 
-    // Emoji face — player reads live from Settings (so switching in the
-    // settings modal mid-run updates instantly), AI snakes use whatever
-    // was randomly assigned to them at spawn. When a face is active it
-    // replaces the plain colored-circle eyes entirely, since the emoji
-    // itself already reads as a face.
-    const activeFace = this.isPlayer ? Settings.face : this.face;
+    // Draw either the emoji face (head replacement) or classic eyes.
     if (activeFace) {
       this._drawFace(ctx, hx, hy, segR, activeFace);
     } else {
