@@ -120,7 +120,7 @@ const SNAKE_FACE_EMOJIS = [
   '💩','🤡','😈','👿','👽','👺','👹','💀','🤖','😺','😸','😾','😼','😹','😻',
   '🌚','🌝','🌞','🧒🏻','👶🏻','👼🏻','🧑🏻','🧓🏻','🫅🏻',
   '🐵','🦁','🐯','🐱','🐶','🐺','🐻','🐻‍❄️','🐨','🐼','🐹','🐭','🐰','🦊','🐮','🐷','🐸',
-  '🎃','💸',
+  '🎃','💸','🧿',
   '😀','😃','😄','😁','😆','😅','😂','🤣','😍','🥰','😘','😚','😙','😗','😉','😭','🤩','🥳',
   '🫠','🙃','🙂','🥲','🥹','😊','😛','😋','🤤','😏','🙂‍↕️','😌','☺️','😝','😜','🤪','🫪',
   '😔','🥺','😬','😑','🤐','🫥','😶‍🌫️','😐','😶','😡','🤬','🤨','😤','😮‍💨','🙄','😒','😠',
@@ -129,14 +129,10 @@ const SNAKE_FACE_EMOJIS = [
   '🤥','😇','🤠','🤑','🤓','😎','🥸',
 ];
 
-// Rude/menacing subset (drawn from the same list above) used for AI and
-// boss snakes — they're the "enemy", so their faces lean aggressive/
-// intimidating rather than the full friendly/silly range players can
-// pick from for themselves.
-const AI_FACE_EMOJIS = [
-  '💩','🤡','😈','👿','👽','👺','👹','💀','🤖','😾',
-  '😡','🤬','😤','😠','🙄','😒',
-];
+// Fixed, more menacing set used only by the Titan Serpent boss — every
+// regular AI snake instead picks randomly from the full SNAKE_FACE_EMOJIS
+// list above (see AISnake constructor).
+const TITAN_FACE_EMOJIS = ['😈', '👿', '👺', '👹', '💀'];
 
 /* Pre-renders each emoji onto its own small offscreen canvas exactly once,
    then every future draw is a cheap drawImage() instead of a fillText().

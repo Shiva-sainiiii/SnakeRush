@@ -866,10 +866,6 @@ function pickSpecies() {
 }
 
 const AI_PERSONALITIES = ['aggressive', 'coward', 'hunter', 'farmer'];
-// Fraction of non-boss AI snakes that spawn with a random emoji face
-// instead of plain eyes. Keeps some visual variety in the world without
-// making every single snake look like a costume party.
-const AI_FACE_CHANCE = 0.55;
 
 class AISnake extends Snake {
   constructor(x, y, bodyColor, headColor, foodGrid, snakes, forcedSpecies = null) {
@@ -894,17 +890,13 @@ class AISnake extends Snake {
     this.state    = AI_STATE.WANDER;
     this.name     = this.isBoss ? 'Titan Serpent' : generateName();
 
-    // Random emoji face — most AI snakes get one for variety, but a chunk
-    // stay plain (classic eyes) so the world doesn't feel like *every*
-    // snake is wearing a costume. Drawn from the rude/menacing subset
-    // (not the full player list) since these are the "enemy" — the boss
-    // always gets one too (guaranteed, not chance-based) on top of its
-    // existing aura ring, so the Titan Serpent reads as extra intimidating.
+    // Every AI snake always has an emoji face — plain circle heads are
+    // player-only now (only shown when the player has "None" selected).
+    // Regular AI picks from the full player-facing list for variety;
+    // Titan boss always picks from its own fixed, more menacing set.
     this.face = this.isBoss
-      ? AI_FACE_EMOJIS[Math.floor(Math.random() * AI_FACE_EMOJIS.length)]
-      : (Math.random() < AI_FACE_CHANCE
-          ? AI_FACE_EMOJIS[Math.floor(Math.random() * AI_FACE_EMOJIS.length)]
-          : null);
+      ? TITAN_FACE_EMOJIS[Math.floor(Math.random() * TITAN_FACE_EMOJIS.length)]
+      : SNAKE_FACE_EMOJIS[Math.floor(Math.random() * SNAKE_FACE_EMOJIS.length)];
 
     // Assign personality (independent of species — a Garter Snake can be
     // aggressive, an Anaconda can be a coward, etc.). The boss always gets
