@@ -88,7 +88,7 @@
       <div id="hero-block">
         <!-- Top-corner icon controls: settings (gear) + sound toggle -->
         <button id="settings-gear-btn" aria-label="Open settings" title="Settings">⚙️</button>
-        <button id="setting-mute" class="icon-btn" aria-pressed="true" aria-label="Toggle sound" title="Sound">🔇</button>
+        <button id="setting-mute" class="icon-btn" aria-pressed="false" aria-label="Toggle sound" title="Sound">🔊</button>
 
         <div id="daily-badge" class="daily-badge hidden">📅 DAILY CHALLENGE</div>
 
@@ -107,6 +107,7 @@
         <div id="score-display" style="display:none;">
           <p>Your final score</p>
           <p id="final-score">0</p>
+          <button id="share-score-btn" class="share-score-btn">📤 Share Score</button>
         </div>
 
         <div id="best-score-display" style="display:none;">
@@ -147,6 +148,18 @@
           <button class="mode-btn" data-mode="timetrial">Time Trial</button>
         </div>
         <div id="mode-desc" class="mode-desc">Eat food, grow big, outlast 10 AI snakes. 3 lives.</div>
+
+        <!-- Daily Challenge: a seeded-RNG modifier on top of Classic mode
+             (same AI count/food/world size/power-ups for everyone on a
+             given day), not a separate mode value. Toggled independently
+             so it can layer onto Classic. -->
+        <button id="daily-toggle" class="daily-toggle" aria-pressed="false">
+          <span class="daily-toggle-icon">📅</span>
+          <span class="daily-toggle-text">
+            <span class="daily-toggle-title">Daily Challenge</span>
+            <span class="daily-toggle-sub" id="daily-toggle-sub">Same seed for everyone today — tap to play</span>
+          </span>
+        </button>
 
         <!-- Collapsible power-ups list — collapsed by default so the start
              screen isn't cluttered with 8 icons on first load; tap to see
@@ -315,10 +328,16 @@
       const overlay  = document.getElementById('overlay');
       const tutorial = document.getElementById('quick-tutorial');
       if (!overlay || !tutorial) return;
-      if (localStorage.getItem(TUTORIAL_KEY)) return; // already seen
+      // Guarded: this inline script can run before game_part1.js (and its
+      // SafeStorage wrapper) is loaded, and localStorage itself can be
+      // blocked in some browsers/webviews — never let that break the
+      // start screen.
+      let alreadySeen = false;
+      try { alreadySeen = !!localStorage.getItem(TUTORIAL_KEY); } catch (_) {}
+      if (alreadySeen) return;
 
       const showTutorial = () => {
-        localStorage.setItem(TUTORIAL_KEY, '1');
+        try { localStorage.setItem(TUTORIAL_KEY, '1'); } catch (_) {}
         tutorial.classList.remove('hidden');
         requestAnimationFrame(() => tutorial.classList.add('visible'));
         setTimeout(() => {

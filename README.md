@@ -55,7 +55,7 @@ SnakeRush/
 ## 🎮 Features
 
 - **Classic & Time Trial** game modes
-- **Daily Challenge** — seeded RNG so every player gets the same challenge on a given day (AI count, food count, world size, enabled power-ups all vary)
+- **Daily Challenge** — seeded RNG so every player gets the same challenge on a given day (AI count, food count, world size all vary); toggle it from the start screen
 - **8 unlockable skins:** 4 free from the start (Multicolour, Fatty, Thin, Designer) + 4 earned via achievements/score milestones (Crimson Fang, Toxic Coil, Royal Serpent, Gilded Legend), persisted across sessions
 - **8 power-ups:** Magnet, Attack, Shield, Ghost, Mine, Speed Boost, Lifeline
 - **AI personalities:** aggressive, coward, hunter, farmer — with flocking behavior for aggressive types
@@ -65,8 +65,10 @@ SnakeRush/
 - **Combo system** with floating multiplier text
 - **Kill feed**, **screen shake**, **hit-stop on kills**, **death cinematic**
 - **Achievement system** (8 achievements) with persistent profile stats
+- **Haptic feedback** on key moments (kills, hits, deaths, power-ups, achievements) — mobile only, no-ops safely elsewhere
+- **Share Score** — generates a styled result card and shares it via the native share sheet (mobile) or downloads it (desktop)
 - **Live minimap**, **biome zones** (3×3 tinted grid), **animated electric fence border**
-- **Firebase Firestore leaderboard**
+- Local **profile stats** (best scores, total kills/food/playtime) persisted across sessions
 - Touch **virtual joystick** + optional **gyroscope steering**
 - Full SEO setup: JSON-LD `VideoGame`/`Person` schema, Open Graph, Twitter cards, sitemap
 
@@ -83,10 +85,20 @@ Net effect: snake keeps looking and feeling bigger the more you eat, but frame c
 
 ---
 
+## 🩹 Notable Bug Fixes
+
+- **localStorage crash risk** — several storage calls (Daily Challenge's seed check, high score, player name) ran with no error handling, including one at module-load time. In browsers/webviews that restrict localStorage, this could throw during script load and prevent the game from starting at all. Everything now goes through a `SafeStorage` wrapper with an in-memory fallback.
+- **Daily Challenge was unreachable** — the backend logic (seeded AI count/food/world size) was fully built, but `DailyChallenge.isActive` was never set to `true` anywhere — there was no UI to turn it on. Added a toggle on the start screen.
+- **Mute button showed the wrong icon on load** — displayed 🔇 (muted) with `aria-pressed="true"` while sound was actually on by default. Fixed to match the real default state.
+- **Respawn thickness bug** — using an extra life reset the snake's segment count but not its girth multiplier, so a snake that had grown thick would respawn short but still fat.
+- **Girth scaling plateaued too early** — the old linear formula hit max thickness by ~3,900 length, so a 6,000-length snake and a 900,000-length snake looked identical. Replaced with a sqrt-based curve that keeps growing visibly across a much wider range.
+
+---
+
 ## 🛠️ Tech Stack
 
 - Vanilla JavaScript (ES6 classes), HTML5 Canvas
-- Firebase (Firestore leaderboard, Auth if applicable)
+- All persistence via localStorage (with an in-memory fallback if localStorage is unavailable)
 - Deployed on Vercel
 - No build step — plain `<script>` includes
 
@@ -94,7 +106,7 @@ Net effect: snake keeps looking and feeling bigger the more you eat, but frame c
 
 ## 🚧 Roadmap / Next Up
 
-- [ ] Live/real-time Firebase leaderboard updates
+- [ ] Online leaderboard (needs a backend — Firebase Firestore or similar; currently all scores are local-only)
 - [ ] Session streak / daily login rewards (XP or cosmetic per day)
 - [ ] Mini in-session quests ("Kill 3 snakes", "Eat 50 food")
-- [ ] Share-score card / screenshot export
+- [ ] Offline support (PWA manifest exists but no service worker yet)
