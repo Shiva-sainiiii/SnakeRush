@@ -293,6 +293,25 @@
 
   <canvas id="game-canvas" style="touch-action:none;"></canvas>
 
+  <!-- Fullscreen minimap — opened by tapping the small minimap in the
+       corner of the game canvas. Shows the whole world at once plus a
+       scrollable list of every snake's name/length/position. -->
+  <div id="fullmap-overlay" class="hidden">
+    <div id="fullmap-backdrop"></div>
+    <div id="fullmap-panel" role="dialog" aria-label="Full map">
+      <div class="fullmap-header">
+        <span class="fullmap-icon">🗺️</span>
+        <span>Map</span>
+        <button id="fullmap-close-btn" aria-label="Close map">✕</button>
+      </div>
+      <canvas id="fullmap-canvas"></canvas>
+      <div id="fullmap-list-wrap">
+        <div class="fullmap-list-header">Snakes on the map</div>
+        <div id="fullmap-list"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- game.js was split into 5 files for maintainability. Load order matters:
        part1 = utils/managers, part2 = entities (Snake/Food/etc),
        part3 = Game class core, part4 = Game render methods (extends part3's
@@ -321,6 +340,45 @@
       if (closeBtn) closeBtn.addEventListener('click', close);
       document.addEventListener('keydown', e => {
         if (e.key === 'Escape' && !modal.classList.contains('hidden')) close();
+      });
+    });
+  </script>
+
+  <!-- Fullscreen minimap open/close. Opening is triggered from game.js
+       (tap detection on the small in-game minimap lives in the canvas
+       touch/mouse handlers, since only game.js knows the minimap's
+       current on-screen rect); this script only owns the ✕/backdrop/
+       Escape close paths and the redraw loop while it's open, same
+       structure as the settings modal above. -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const overlay  = document.getElementById('fullmap-overlay');
+      const backdrop = document.getElementById('fullmap-backdrop');
+      const closeBtn = document.getElementById('fullmap-close-btn');
+      if (!overlay) return;
+
+      let rafId = null;
+      const redrawLoop = () => {
+        if (overlay.classList.contains('hidden')) { rafId = null; return; }
+        if (window._game && window._game._drawFullMap) window._game._drawFullMap();
+        rafId = requestAnimationFrame(redrawLoop);
+      };
+
+      window._openFullMap = () => {
+        if (!window._game || !window._game.running) return;
+        overlay.classList.remove('hidden');
+        if (rafId === null) rafId = requestAnimationFrame(redrawLoop);
+      };
+      const close = () => {
+        overlay.classList.add('hidden');
+        if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+      };
+      window._closeFullMap = close;
+
+      if (backdrop) backdrop.addEventListener('click', close);
+      if (closeBtn) closeBtn.addEventListener('click', close);
+      document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && !overlay.classList.contains('hidden')) close();
       });
     });
   </script>
