@@ -129,6 +129,15 @@ const SNAKE_FACE_EMOJIS = [
   '🤥','😇','🤠','🤑','🤓','😎','🥸',
 ];
 
+// Rude/menacing subset (drawn from the same list above) used for AI and
+// boss snakes — they're the "enemy", so their faces lean aggressive/
+// intimidating rather than the full friendly/silly range players can
+// pick from for themselves.
+const AI_FACE_EMOJIS = [
+  '💩','🤡','😈','👿','👽','👺','👹','💀','🤖','😾',
+  '😡','🤬','😤','😠','🙄','😒',
+];
+
 /* Pre-renders each emoji onto its own small offscreen canvas exactly once,
    then every future draw is a cheap drawImage() instead of a fillText().
    fillText() on canvas is comparatively expensive (font shaping/glyph

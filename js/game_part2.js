@@ -655,7 +655,10 @@ class Snake {
     const img = EmojiIconCache.get(emoji);
     if (!img) { this._drawEyes(ctx, hx, hy, segR); return; }
 
-    const drawSize = segR * 2.3; // slightly larger than the head circle
+    // Noticeably bigger than the old plain head circle (which was
+    // segR * 1.35 radius = segR * 2.7 diameter) so the face reads clearly
+    // as the "head" rather than blending in with the body segments.
+    const drawSize = segR * 3.4;
     ctx.drawImage(img, hx - drawSize / 2, hy - drawSize / 2, drawSize, drawSize);
   }
 
@@ -893,12 +896,15 @@ class AISnake extends Snake {
 
     // Random emoji face — most AI snakes get one for variety, but a chunk
     // stay plain (classic eyes) so the world doesn't feel like *every*
-    // snake is wearing a costume. Boss keeps its own dedicated aura/look
-    // rather than a random emoji, matching how it already has a dedicated
-    // personality instead of a random roll above.
-    this.face = (!this.isBoss && Math.random() < AI_FACE_CHANCE)
-      ? SNAKE_FACE_EMOJIS[Math.floor(Math.random() * SNAKE_FACE_EMOJIS.length)]
-      : null;
+    // snake is wearing a costume. Drawn from the rude/menacing subset
+    // (not the full player list) since these are the "enemy" — the boss
+    // always gets one too (guaranteed, not chance-based) on top of its
+    // existing aura ring, so the Titan Serpent reads as extra intimidating.
+    this.face = this.isBoss
+      ? AI_FACE_EMOJIS[Math.floor(Math.random() * AI_FACE_EMOJIS.length)]
+      : (Math.random() < AI_FACE_CHANCE
+          ? AI_FACE_EMOJIS[Math.floor(Math.random() * AI_FACE_EMOJIS.length)]
+          : null);
 
     // Assign personality (independent of species — a Garter Snake can be
     // aggressive, an Anaconda can be a coward, etc.). The boss always gets
