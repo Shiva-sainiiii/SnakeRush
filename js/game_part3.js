@@ -666,6 +666,8 @@ class Game {
     this._ghostCount     = 0;
     this._mineCount      = 0;
     this._speedCount     = 0;
+    this._fireCount      = 0;
+    this._freezeCount    = 0;
 
     for (let i = 0; i < foodCount; i++) this._spawnFood();
 
@@ -716,7 +718,7 @@ class Game {
   }
 
   /* ── FOOD SPAWNING ───────────────────────────────────────── */
-  _spawnFood(forceType = null, x = null, y = null) {
+  _spawnFood(forceType = null, x = null, y = null, useRainEmoji = false) {
     const W = this._worldW || WORLD_W, H = this._worldH || WORLD_H;
     const fx  = x  ?? (50 + Math.random() * (W - 100));
     const fy  = y  ?? (50 + Math.random() * (H - 100));
@@ -735,6 +737,8 @@ class Game {
       const afterGhost    = afterShield   + GHOST_SPAWN_RATE;
       const afterMine     = afterGhost    + MINE_SPAWN_RATE;
       const afterSpeed    = afterMine     + SPEED_SPAWN_RATE;
+      const afterFire     = afterSpeed    + FIRE_SPAWN_RATE;
+      const afterFreeze   = afterFire     + FREEZE_SPAWN_RATE;
 
       if      (roll < afterLifeline && this._lifelineCount < LIFELINE_MAX_ON_MAP && ok('lifeline'))    type = FOOD_TYPE.LIFELINE;
       else if (roll < afterMagnet && ok('magnet'))                                                     type = FOOD_TYPE.MAGNET;
@@ -743,10 +747,15 @@ class Game {
       else if (roll < afterGhost && this._ghostCount < GHOST_MAX_ON_MAP && ok('ghost'))                type = FOOD_TYPE.GHOST;
       else if (roll < afterMine && this._mineCount < MINE_MAX_ON_MAP && ok('mine'))                    type = FOOD_TYPE.MINE;
       else if (roll < afterSpeed && this._speedCount < SPEED_MAX_ON_MAP && ok('speed'))                type = FOOD_TYPE.SPEED;
+      // Debuff foods (fire/freeze) aren't gated by the daily's enabled-
+      // powerups list — that list only ever toggles rewards, and these
+      // two are penalties, not rewards, so they stay active every day.
+      else if (roll < afterFire && this._fireCount < FIRE_MAX_ON_MAP)                                   type = FOOD_TYPE.FIRE;
+      else if (roll < afterFreeze && this._freezeCount < FREEZE_MAX_ON_MAP)                              type = FOOD_TYPE.FREEZE;
       else                                                                                              type = FOOD_TYPE.NORMAL;
     }
 
-    const f = new Food(fx, fy, col, type);
+    const f = new Food(fx, fy, col, type, null, useRainEmoji);
     this.foods.push(f);
     this.foodGrid.add(f);
     if (type === FOOD_TYPE.LIFELINE) this._lifelineCount++;
@@ -754,6 +763,8 @@ class Game {
     if (type === FOOD_TYPE.GHOST)    this._ghostCount++;
     if (type === FOOD_TYPE.MINE)     this._mineCount++;
     if (type === FOOD_TYPE.SPEED)    this._speedCount++;
+    if (type === FOOD_TYPE.FIRE)     this._fireCount++;
+    if (type === FOOD_TYPE.FREEZE)   this._freezeCount++;
     return f;
   }
 
@@ -764,6 +775,8 @@ class Game {
     if (food.type === FOOD_TYPE.GHOST)    this._ghostCount--;
     if (food.type === FOOD_TYPE.MINE)     this._mineCount--;
     if (food.type === FOOD_TYPE.SPEED)    this._speedCount--;
+    if (food.type === FOOD_TYPE.FIRE)     this._fireCount--;
+    if (food.type === FOOD_TYPE.FREEZE)   this._freezeCount--;
     const idx = this.foods.indexOf(food);
     if (idx !== -1) {
       this.foods[idx] = this.foods[this.foods.length - 1];
@@ -1015,6 +1028,17 @@ class Game {
             }
             continue;
           }
+          if (food.type === FOOD_TYPE.FIRE) {
+            this.player.activateFireDebuff();
+            this.shake.trigger(4, 0.2);
+            Haptics.hit();
+            eaten.push(food); this._spawnFood(FOOD_TYPE.NORMAL); continue;
+          }
+          if (food.type === FOOD_TYPE.FREEZE) {
+            this.player.activateFreeze();
+            Haptics.hit();
+            eaten.push(food); this._spawnFood(FOOD_TYPE.NORMAL); continue;
+          }
         } else if (food.type === FOOD_TYPE.ATTACK) {
           // AI snakes can now use ATTACK food too — gives them the same
           // temporary bite ability the player gets. Everything else about
@@ -1023,6 +1047,14 @@ class Game {
           // option that _checkSnakeCollisions() now honors for any
           // attacking snake, not just the player.
           snake.activateAttack();
+          eaten.push(food); this._spawnFood(FOOD_TYPE.NORMAL); continue;
+        } else if (food.type === FOOD_TYPE.FIRE || food.type === FOOD_TYPE.FREEZE) {
+          // These are player-only debuffs (AISnake has no freezeTimer/
+          // shrink-on-fire behavior wired up). AI just clears the food
+          // without growing from it, rather than falling through to the
+          // generic eat() below which would otherwise treat it as free
+          // length — that would make these tiles a hidden buff for AI
+          // while being a penalty for the player, which reads as unfair.
           eaten.push(food); this._spawnFood(FOOD_TYPE.NORMAL); continue;
         }
         // Other power-up types eaten by AI fall through to the generic
@@ -1146,7 +1178,7 @@ class Game {
         const dist = 80 + Math.random() * 500;
         const fx = Math.max(50, Math.min(W - 50, cx + Math.cos(ang) * dist));
         const fy = Math.max(50, Math.min(H - 50, cy + Math.sin(ang) * dist));
-        this._spawnFood(FOOD_TYPE.NORMAL, fx, fy);
+        this._spawnFood(FOOD_TYPE.NORMAL, fx, fy, true);
       }
       this._showEventBanner('🌧️ FOOD RAIN!');
     } else {
