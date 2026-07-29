@@ -210,6 +210,18 @@
         </div>
       </div>
 
+      <!-- Player creature picker — Snake (default) or Centipede. Chosen
+           once per spawn (see PlayerSnake constructor); switching mid-run
+           applies on the next respawn/restart, same as species selection
+           already works for AI. -->
+      <div class="setting-row setting-row--vertical">
+        <label class="setting-label">🐛 Play As</label>
+        <div class="species-btns" id="species-selector" role="group" aria-label="Player creature">
+          <button class="species-btn" data-species="snake" aria-pressed="false">🐍 Snake</button>
+          <button class="species-btn" data-species="centipede" aria-pressed="false">🐛 Centipede</button>
+        </div>
+      </div>
+
       <!-- Snake design selector — populated by JS from SKINS_DEF so locked
            skins show a lock icon + unlock hint instead of being hidden. -->
       <div class="setting-row setting-row--vertical">
