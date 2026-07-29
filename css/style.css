@@ -876,9 +876,6 @@ body::after {
   inset: 0;
   z-index: 45;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 14px;
 }
 
 #fullmap-overlay.hidden { display: none; }
@@ -886,26 +883,35 @@ body::after {
 #fullmap-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0,0,0,0.88);
+  background: #000;
 }
 
 #fullmap-panel {
   position: relative;
   width: 100%;
-  max-width: 560px;
   height: 100%;
-  max-height: 92svh;
-  background: var(--panel);
-  border: 2px solid var(--line);
-  border-radius: 16px;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  height: 100svh;
+  background: #030608;
   overflow: hidden;
 }
 
+/* Canvas now fills the entire screen edge-to-edge — the header and the
+   snake list both float on top of it as overlays (see below) rather than
+   taking their own layout row, so the map itself gets all the space. */
+#fullmap-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
 .fullmap-header {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: 12px;
+  right: 12px;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -914,9 +920,11 @@ body::after {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--green);
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 10px;
-  flex: 0 0 auto;
+  background: rgba(5,10,15,0.75);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 10px;
 }
 
 .fullmap-icon { font-size: 0.9rem; }
@@ -938,33 +946,50 @@ body::after {
 
 #fullmap-close-btn:hover { color: var(--text); }
 
-#fullmap-canvas {
-  flex: 1 1 auto;
-  min-height: 0;
-  width: 100%;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: #030608;
-  display: block;
-}
-
+/* Snake list — a collapsible bottom sheet floating over the map canvas.
+   Collapsed by default to a single header bar so the map stays fully
+   visible; tapping the header expands it to show the full scrollable
+   list without navigating away from the map. */
 #fullmap-list-wrap {
-  flex: 0 0 auto;
-  max-height: 30%;
-  min-height: 90px;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 2;
+  max-height: 60svh;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  background: rgba(5,10,15,0.82);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
 }
 
 .fullmap-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-dim);
   flex: 0 0 auto;
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
 }
+
+.fullmap-list-arrow {
+  transition: transform 0.2s;
+  font-size: 0.6rem;
+}
+
+/* Collapsed state — only the header bar shows, list content is hidden
+   entirely so it doesn't block the map underneath. */
+#fullmap-list-wrap.collapsed #fullmap-list { display: none; }
+#fullmap-list-wrap.collapsed .fullmap-list-arrow { transform: rotate(180deg); }
 
 #fullmap-list {
   overflow-y: auto;
@@ -972,6 +997,7 @@ body::after {
   flex-direction: column;
   gap: 3px;
   min-height: 0;
+  padding: 0 8px 8px;
 }
 
 .fullmap-row {
@@ -981,16 +1007,16 @@ body::after {
   font-size: 0.72rem;
   padding: 4px 8px;
   border-radius: 8px;
-  background: var(--panel-2);
+  background: rgba(255,255,255,0.04);
 }
 
 .fullmap-row.fullmap-row--player {
-  background: rgba(126,255,178,0.12);
+  background: rgba(126,255,178,0.14);
   border: 1px solid rgba(126,255,178,0.35);
 }
 
 .fullmap-row.fullmap-row--boss {
-  background: rgba(255,60,20,0.12);
+  background: rgba(255,60,20,0.14);
   border: 1px solid rgba(255,60,20,0.35);
 }
 
