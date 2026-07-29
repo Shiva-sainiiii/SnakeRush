@@ -343,10 +343,11 @@ function getSegmentR(snakeOrIsPlayer = false) {
   if (snakeOrIsPlayer === true) {
     const game = window._game;
     const girth = (game && game.player && game.player._girthMul) || 1;
+    const radiusMul = (game && game.player && game.player.radiusMul) || 1;
     switch (Settings.design) {
-      case 'fatty':  return Math.round(SEGMENT_R_BASE * 1.45 * girth);
-      case 'thin':   return Math.round(SEGMENT_R_BASE * 0.60 * girth);
-      default:       return Math.round(SEGMENT_R_BASE * girth);
+      case 'fatty':  return Math.round(SEGMENT_R_BASE * 1.45 * radiusMul * girth);
+      case 'thin':   return Math.round(SEGMENT_R_BASE * 0.60 * radiusMul * girth);
+      default:       return Math.round(SEGMENT_R_BASE * radiusMul * girth);
     }
   }
   if (snakeOrIsPlayer && snakeOrIsPlayer.isPlayer) {
@@ -604,11 +605,9 @@ class Snake {
       ctx.fill();
     }
 
-    // Centipede legs — a cheap cosmetic pass: two short strokes per
-    // alternating segment, perpendicular to the body direction at that
-    // point, with a per-segment wiggle so they look like they're actively
-    // scuttling rather than static ticks. Only centipedes pay this cost;
-    // every other snake/species skips this block entirely.
+    // Centipede legs — jointed hip->knee->foot curves with an alternating
+    // walk-cycle gait (see _drawCentipedeLegs/_strokeCentipedeLeg). Only
+    // centipedes pay this cost; every other snake/species skips it.
     if (this.moveStyle === 'centipede') {
       this._drawCentipedeLegs(ctx, camX, camY, segR, _logW, _logH);
     }
@@ -743,24 +742,32 @@ class Snake {
 
     // Noticeably bigger than the old plain head circle (which was
     // segR * 1.35 radius = segR * 2.7 diameter) so the face reads clearly
-    // as the "head" rather than blending in with the body segments.
-    const drawSize = segR * 3.4;
+    // as the "head" rather than blending in with the body segments. Sized
+    // up further from the original 3.4x — thinner species (centipede/ant,
+    // radiusMul well under 1) have a small segR, so the head needs extra
+    // relative size to still look proportioned rather than lost against
+    // the body width.
+    const drawSize = segR * 4.2;
     ctx.drawImage(img, hx - drawSize / 2, hy - drawSize / 2, drawSize, drawSize);
   }
 
-  // Cheap procedural legs for the centipede species: one pair of short
-  // perpendicular strokes on every other body segment, phase-shifted
-  // along the body and animated by the shared _wiggleT timer so alternate
-  // legs swing oppositely, like a real many-legged scuttle. All legs are
-  // drawn in a single stroke() call (one path, many subpaths) rather than
-  // one stroke per leg-pair, keeping this a fixed small per-frame cost
-  // regardless of body length.
+  // Procedural legs for the centipede species. Each leg is a bent
+  // quadratic curve (hip -> knee -> foot) rather than a straight radial
+  // line, so they read as jointed limbs instead of spikes. The gait
+  // alternates each leg pair between a forward "reach" and a backward
+  // "push" phase (like a real many-legged tripod gait: alternating sides
+  // step out of sync), with the knee bulging further out mid-stride and
+  // flattening at the stride extremes — that knee-bulge is what actually
+  // sells "walking" rather than a uniform in/out swing. All legs are
+  // still drawn in a single stroke() call (one path, many subpaths), so
+  // this stays a fixed small per-frame cost regardless of body length.
   _drawCentipedeLegs(ctx, camX, camY, segR, logW, logH) {
     const segs = this.segments;
     const len  = segs.length;
     if (len < 2) return;
 
-    const legLen = segR * 1.3;
+    const legLen  = segR * 1.5;
+    const gaitSpd = 9;
     ctx.beginPath();
     for (let i = 1; i < len; i += 2) {
       const p = segs[i];
@@ -775,20 +782,48 @@ class Snake {
       dx /= dlen; dy /= dlen;
       const px = -dy, py = dx; // perpendicular unit vector
 
-      // Alternate legs swing opposite directions, offset along the body
-      // (i * 0.9) so the wave travels down the length like a real gait.
-      const swing = Math.sin(this._wiggleT * 10 - i * 0.9) * 0.4;
-      const lx = px * (1 + swing), ly = py * (1 + swing);
+      // Phase offset travels down the body (i * 0.9) so the stride wave
+      // ripples tail-ward like a real centipede's gait, and left/right
+      // sides are offset by PI so they alternate rather than stepping in
+      // unison (a real many-legged gait never moves both sides together).
+      const phase   = this._wiggleT * gaitSpd - i * 0.9;
+      const strideL = Math.sin(phase);
+      const strideR = Math.sin(phase + Math.PI);
 
-      ctx.moveTo(sx + lx * legLen * 0.3, sy + ly * legLen * 0.3);
-      ctx.lineTo(sx + lx * legLen, sy + ly * legLen);
-      ctx.moveTo(sx - lx * legLen * 0.3, sy - ly * legLen * 0.3);
-      ctx.lineTo(sx - lx * legLen, sy - ly * legLen);
+      this._strokeCentipedeLeg(ctx, sx, sy, px, py, dx, dy, legLen, strideL, +1);
+      this._strokeCentipedeLeg(ctx, sx, sy, px, py, dx, dy, legLen, strideR, -1);
     }
     ctx.strokeStyle = this._resolveBodyColor();
-    ctx.lineWidth = Math.max(1, segR * 0.28);
+    ctx.lineWidth = Math.max(1, segR * 0.26);
     ctx.lineCap = 'round';
     ctx.stroke();
+  }
+
+  // Builds one jointed leg (hip -> knee -> foot) as a quadratic curve and
+  // adds it as a subpath to whatever path is already open on ctx — caller
+  // is responsible for beginPath()/stroke(). `side` is +1 or -1 for
+  // left/right. `stride` is a -1..1 value (a sine wave from the caller)
+  // driving the walk cycle:
+  //   stride  1  -> leg fully forward, reaching (knee pushed forward+out)
+  //   stride -1  -> leg fully back, pushing off (knee pushed back+out)
+  //   stride  0  -> leg passing under the body (knee pulled in tight,
+  //                 close to the body) — this is what makes it read as a
+  //                 lift-and-place step rather than a rigid paddle-wheel.
+  _strokeCentipedeLeg(ctx, sx, sy, px, py, dx, dy, legLen, stride, side) {
+    // Knee bulges outward the most at the stride extremes and pulls in
+    // tight at stride 0 — this in/out breathing of the knee, combined
+    // with the fore/aft sweep, is what makes the leg look like it's
+    // actually stepping rather than just swinging a straight rod.
+    const outAmt  = 0.55 + 0.45 * Math.abs(stride);
+    const foreAmt = stride * 0.65;
+
+    const kneeX = sx + px * side * legLen * 0.55 * outAmt + dx * legLen * foreAmt;
+    const kneeY = sy + py * side * legLen * 0.55 * outAmt + dy * legLen * foreAmt;
+    const footX = sx + px * side * legLen * outAmt + dx * legLen * foreAmt * 1.3;
+    const footY = sy + py * side * legLen * outAmt + dy * legLen * foreAmt * 1.3;
+
+    ctx.moveTo(sx, sy);
+    ctx.quadraticCurveTo(kneeX, kneeY, footX, footY);
   }
 
   _resolveBodyColor() {
@@ -838,6 +873,17 @@ class PlayerSnake extends Snake {
     this.boosting       = false;
     this._boostDrainAcc = 0;
 
+    // Player creature choice — 'snake' (default, no visual/stat change)
+    // or 'centipede' (legs + slightly smaller body, matching the AI
+    // centipede species' radiusMul so the two read consistently). Chosen
+    // once at spawn time from Settings.playerSpecies so it can't change
+    // mid-run just by flipping the setting (matches how AI species are
+    // fixed for a snake's whole lifetime too).
+    const speciesDef = Settings.playerSpecies === 'centipede' ? CENTIPEDE_SPECIES : null;
+    this.moveStyle = speciesDef ? speciesDef.moveStyle : null;
+    this.radiusMul = speciesDef ? speciesDef.radiusMul : 1;
+    this._wiggleT  = Math.random() * 10;
+
     this.lives          = PLAYER_LIVES;
     this.iFrameTimer    = 0;
     this.magnetTimer    = 0;
@@ -862,6 +908,8 @@ class PlayerSnake extends Snake {
 
   update(dt, camX, camY, joystickDir = null, gyroDir = null) {
     if (!this.alive) return;
+
+    this._wiggleT += dt;
 
     // Periodic animal sound for the player's selected face (e.g. 🐮 moos
     // every ~10-15s). No-op instantly for faces with no mapped sound, and

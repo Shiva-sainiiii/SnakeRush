@@ -57,6 +57,11 @@ class Game {
     this._rafId        = null;
     this._boundLoop    = this._loop.bind(this);
     this._foodQueryBuf = [];
+    // Separate buffer for the render pass's foodGrid query (see _render in
+    // game_part4.js) — kept distinct from _foodQueryBuf (used for
+    // eating-detection) so the two independent query sites can never step
+    // on each other's results even if the call order ever changes.
+    this._foodRenderBuf = [];
     this._killList     = [];
 
     // Hit-stop
@@ -460,6 +465,28 @@ class Game {
       sensVal.textContent  = Settings.sensitivity;
       savePersistedSettings();
     });
+
+    // Player species picker — Snake vs Centipede. Takes effect on next
+    // spawn (see PlayerSnake constructor), not retroactively on the
+    // current run, same as any other appearance/stat choice.
+    const speciesBtns = document.querySelectorAll('.species-btn');
+    if (speciesBtns.length) {
+      const syncSpeciesBtns = () => {
+        speciesBtns.forEach(b => {
+          const active = b.dataset.species === Settings.playerSpecies;
+          b.classList.toggle('active', active);
+          b.setAttribute('aria-pressed', String(active));
+        });
+      };
+      syncSpeciesBtns();
+      speciesBtns.forEach(b => {
+        b.addEventListener('click', () => {
+          Settings.playerSpecies = b.dataset.species;
+          syncSpeciesBtns();
+          savePersistedSettings();
+        });
+      });
+    }
 
     // Skin selector — rendered dynamically from SKINS_DEF so locked skins
     // show a 🔒 + unlock hint instead of just not existing. Tapping a

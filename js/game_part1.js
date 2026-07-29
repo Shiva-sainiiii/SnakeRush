@@ -86,6 +86,7 @@ const Settings = {
   gyro:        false,
   face:        null,        // emoji face for player's head, null = classic eyes
   animalSounds: false,      // periodic animal SFX for animal-mapped faces — off by default
+  playerSpecies: 'snake',   // 'snake' | 'centipede' — which creature the player controls
 };
 
 /* Persist a subset of Settings across sessions (design choice, sensitivity,
@@ -100,6 +101,7 @@ const Settings = {
     if (stored.mode === 'classic' || stored.mode === 'timetrial') Settings.mode = stored.mode;
     if (typeof stored.face === 'string' || stored.face === null) Settings.face = stored.face;
     if (typeof stored.animalSounds === 'boolean') Settings.animalSounds = stored.animalSounds;
+    if (stored.playerSpecies === 'snake' || stored.playerSpecies === 'centipede') Settings.playerSpecies = stored.playerSpecies;
   } catch(_) {}
 })();
 
@@ -107,7 +109,7 @@ function savePersistedSettings() {
   try {
     SafeStorage.setItem(SETTINGS_KEY, JSON.stringify({
       design: Settings.design, sensitivity: Settings.sensitivity, mode: Settings.mode,
-      face: Settings.face, animalSounds: Settings.animalSounds,
+      face: Settings.face, animalSounds: Settings.animalSounds, playerSpecies: Settings.playerSpecies,
     }));
   } catch(_) {}
 }

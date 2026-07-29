@@ -25,7 +25,24 @@ Object.assign(Game.prototype, {
     if (this.player && this.player.alive && this.player.magnetTimer > 0) this._drawMagnetAura();
 
     ctx.save();
-    for (const food of this.foods) food.draw(ctx, this.camX, this.camY);
+    // Query only the food actually near the visible viewport instead of
+    // iterating every food item in the world (up to ~2500) every frame —
+    // each Food.draw() already culled itself if off-screen, but that
+    // still paid a full function-call + camera-math cost per item first.
+    // The world's foodGrid (used for eat-detection) is reused here for
+    // rendering too, queried around the camera's center with a radius
+    // that covers the viewport diagonal plus a margin so nothing pops in
+    // right at the screen edge.
+    if (this.foodGrid) {
+      const viewCx = this.camX + logW / 2;
+      const viewCy = this.camY + logH / 2;
+      const viewRadius = Math.sqrt(logW * logW + logH * logH) / 2 + 80;
+      this.foodGrid.query(viewCx, viewCy, viewRadius, this._foodRenderBuf);
+      for (const food of this._foodRenderBuf) food.draw(ctx, this.camX, this.camY);
+    } else {
+      // Fallback for any state where the grid isn't ready yet.
+      for (const food of this.foods) food.draw(ctx, this.camX, this.camY);
+    }
     ctx.restore();
 
     // Draw mines
