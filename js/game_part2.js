@@ -565,6 +565,15 @@ class Snake {
     const _logW = ctx.canvas.width  / _dpr;
     const _logH = ctx.canvas.height / _dpr;
 
+    // Centipede legs are drawn BEFORE the body fill (not after) so the
+    // body paints over each leg's hip/attachment point — only the outer
+    // portion of each leg peeks out from the sides of the body, the way
+    // legs actually look attached underneath a real centipede rather
+    // than drawn on top of it.
+    if (this.moveStyle === 'centipede') {
+      this._drawCentipedeLegs(ctx, camX, camY, segR, _logW, _logH);
+    }
+
     if (isMulticolour) {
       const pal = playerSkin.palette;
       for (let i = len - 1; i >= 1; i--) {
@@ -603,13 +612,6 @@ class Snake {
       }
       ctx.fillStyle = bodyFill;
       ctx.fill();
-    }
-
-    // Centipede legs — jointed hip->knee->foot curves with an alternating
-    // walk-cycle gait (see _drawCentipedeLegs/_strokeCentipedeLeg). Only
-    // centipedes pay this cost; every other snake/species skips it.
-    if (this.moveStyle === 'centipede') {
-      this._drawCentipedeLegs(ctx, camX, camY, segR, _logW, _logH);
     }
 
     // Emoji face — player reads live from Settings (so switching in the
@@ -783,15 +785,16 @@ class Snake {
       const px = -dy, py = dx; // perpendicular unit vector
 
       // Phase offset travels down the body (i * 0.9) so the stride wave
-      // ripples tail-ward like a real centipede's gait, and left/right
-      // sides are offset by PI so they alternate rather than stepping in
-      // unison (a real many-legged gait never moves both sides together).
-      const phase   = this._wiggleT * gaitSpd - i * 0.9;
-      const strideL = Math.sin(phase);
-      const strideR = Math.sin(phase + Math.PI);
+      // ripples tail-ward like a real centipede's gait. Left and right
+      // legs on the SAME segment share this phase (mirror-symmetric at
+      // every instant) rather than being offset from each other — the
+      // walking look comes entirely from the phase changing down the
+      // body length, not from the two sides of one pair looking
+      // different from each other, which read as lopsided/asymmetric.
+      const stride = Math.sin(this._wiggleT * gaitSpd - i * 0.9);
 
-      this._strokeCentipedeLeg(ctx, sx, sy, px, py, dx, dy, legLen, strideL, +1);
-      this._strokeCentipedeLeg(ctx, sx, sy, px, py, dx, dy, legLen, strideR, -1);
+      this._strokeCentipedeLeg(ctx, sx, sy, px, py, dx, dy, legLen, stride, +1);
+      this._strokeCentipedeLeg(ctx, sx, sy, px, py, dx, dy, legLen, stride, -1);
     }
     ctx.strokeStyle = this._resolveBodyColor();
     ctx.lineWidth = Math.max(1, segR * 0.26);
@@ -1071,9 +1074,12 @@ const SNAKE_SPECIES = [
   {
     // Many short segments + rendered legs and a per-segment wiggle offset
     // (see _drawLegs / wiggle in Snake.draw). Faster than its size would
-    // suggest, matching a real centipede's quick scuttle.
+    // suggest, matching a real centipede's quick scuttle. Thicker and
+    // shorter than the original tuning — reads more like an actual
+    // centipede body (short, stubby, wide) rather than a thin long snake
+    // with legs stuck on.
     id: 'centipede', label: 'Centipede',
-    minLen: 18, maxLen: 28,  radiusMul: 0.5,  speedMul: 1.35,
+    minLen: 10, maxLen: 16,  radiusMul: 0.8,  speedMul: 1.35,
     weight: 12, scoreMul: 1.1, moveStyle: 'centipede',
   },
   {
