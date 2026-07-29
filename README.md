@@ -16,7 +16,6 @@ SnakeRush/
 ├── robots.txt
 ├── sitemap.xml
 ├── favicon.ico
-├── google5f62a4ee91bc28cd.html # Google Search Console verification
 ├── googledecff8a97b3b7f45.html # Google Search Console verification
 │
 ├── css/
@@ -57,6 +56,9 @@ SnakeRush/
 ├── sw.js                               ← Service worker (offline caching)
 ├── favicon.ico                         ← multi-res favicon (16/32/48)
 │
+├── robots.txt
+├── sitemap.xml
+├── googledecff8a97b3b7f45.html # Google Search Console verification
 ├── css/
 │   └── style.css                       ← all game + menu + settings styling
 │
