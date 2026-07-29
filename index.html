@@ -225,6 +225,13 @@
         <div class="face-btns" id="face-selector" role="group" aria-label="Snake face"></div>
       </div>
 
+      <!-- Animal sound toggle — off by default. When on, an animal-mapped
+           face (e.g. 🐮) periodically plays its matching sound. -->
+      <div class="setting-row">
+        <label class="setting-label" for="setting-animal-sounds">🔊 Animal Sounds</label>
+        <button id="setting-animal-sounds" class="toggle-btn" aria-pressed="false">OFF</button>
+      </div>
+
       <!-- ── Stats Panel ──────────────────────────────────── -->
       <div id="stats-panel">
         <div class="stats-header" id="stats-toggle">
@@ -294,19 +301,26 @@
   <canvas id="game-canvas" style="touch-action:none;"></canvas>
 
   <!-- Fullscreen minimap — opened by tapping the small minimap in the
-       corner of the game canvas. Shows the whole world at once plus a
-       scrollable list of every snake's name/length/position. -->
+       corner of the game canvas. The canvas fills the entire panel;
+       the header and snake-list are floated on top of it as overlays
+       rather than taking their own layout space, so the map itself gets
+       the full screen. -->
   <div id="fullmap-overlay" class="hidden">
     <div id="fullmap-backdrop"></div>
     <div id="fullmap-panel" role="dialog" aria-label="Full map">
+      <canvas id="fullmap-canvas"></canvas>
+
       <div class="fullmap-header">
         <span class="fullmap-icon">🗺️</span>
         <span>Map</span>
         <button id="fullmap-close-btn" aria-label="Close map">✕</button>
       </div>
-      <canvas id="fullmap-canvas"></canvas>
-      <div id="fullmap-list-wrap">
-        <div class="fullmap-list-header">Snakes on the map</div>
+
+      <div id="fullmap-list-wrap" class="collapsed">
+        <div class="fullmap-list-header" id="fullmap-list-toggle">
+          <span>Snakes on the map</span>
+          <span class="fullmap-list-arrow">▲</span>
+        </div>
         <div id="fullmap-list"></div>
       </div>
     </div>
@@ -355,7 +369,18 @@
       const overlay  = document.getElementById('fullmap-overlay');
       const backdrop = document.getElementById('fullmap-backdrop');
       const closeBtn = document.getElementById('fullmap-close-btn');
+      const listWrap = document.getElementById('fullmap-list-wrap');
+      const listToggle = document.getElementById('fullmap-list-toggle');
       if (!overlay) return;
+
+      // List starts collapsed (header bar only) every time the map opens,
+      // so the player sees the full map first and can expand the list on
+      // demand rather than it eating screen space immediately.
+      if (listToggle && listWrap) {
+        listToggle.addEventListener('click', () => {
+          listWrap.classList.toggle('collapsed');
+        });
+      }
 
       let rafId = null;
       const redrawLoop = () => {
@@ -366,6 +391,7 @@
 
       window._openFullMap = () => {
         if (!window._game || !window._game.running) return;
+        if (listWrap) listWrap.classList.add('collapsed');
         overlay.classList.remove('hidden');
         if (rafId === null) rafId = requestAnimationFrame(redrawLoop);
       };
