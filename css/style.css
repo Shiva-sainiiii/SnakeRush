@@ -3,6 +3,28 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  /* Kill the browser's default blue tap-highlight rectangle on every
+     element, not just specific buttons — this used to only be set on a
+     handful of icon buttons, which left it showing up on anything not
+     explicitly covered (settings rows, face/skin picker buttons, mode
+     buttons, list rows, etc). */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+/* Buttons/links still get a visible focus state for keyboard/a11y users
+   (outline), just not the mobile tap-highlight flash or a stray blue
+   focus ring on touch taps. */
+button, a, [role="button"] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+button:focus, [role="button"]:focus, a:focus {
+  outline: none;
+}
+button:focus-visible, [role="button"]:focus-visible, a:focus-visible {
+  outline: 2px solid var(--green, #39ff6a);
+  outline-offset: 2px;
 }
 
 html, body {
@@ -1221,6 +1243,32 @@ body::after {
 }
 
 .face-btn--none.active { color: #000; }
+
+.species-btns {
+  display: flex;
+  gap: 8px;
+}
+
+.species-btn {
+  flex: 1 1 0;
+  padding: 10px 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  border-radius: 10px;
+  border: 2px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, transform 0.1s;
+}
+
+.species-btn:hover { border-color: var(--green-dim); }
+
+.species-btn.active {
+  background: var(--green);
+  border-color: var(--green);
+  color: #000;
+}
 
 .skin-lock-toast {
   width: 100%;
