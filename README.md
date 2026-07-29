@@ -11,54 +11,17 @@ Built by [Shiva Saini](https://shivasainiportfolio.vercel.app) — [GitHub](http
 ## 📁 Folder Structure
 
 ```
-SnakeRush/
-├── index.html                  # Main entry point, SEO meta tags, structured data
-├── robots.txt
-├── sitemap.xml
-├── favicon.ico
-├── googledecff8a97b3b7f45.html # Google Search Console verification
-│
-├── css/
-│   └── style.css               # All game + UI styling
-│
-├── js/
-│   ├── game_part1.js           # Settings, persistence, daily challenge,
-│   │                            # name generator, kill feed, audio manager
-│   ├── game_part2.js           # Snake class (movement, growth, rendering)
-│   ├── game_part3.js           # Game engine — collisions, AI, spawning,
-│   │                            # scoring, HUD updates
-│   ├── game_part4.js           # Additional systems / UI wiring
-│   └── game_part5.js           # Bootstrap / init
-│
-└── assets/
-    ├── favicon-512.png / favicon-192.png / favicon-32.png / favicon-16.png
-    ├── apple-touch-icon.png
-    ├── bgmusic.mp3          # Background music (loop)
-    ├── eat.mp3              # Eating food
-    ├── run.mp3              # Danger-zone running loop
-    ├── panic.mp3            # Low-life panic loop
-    ├── nearsnake.mp3        # Enemy snake nearby warning
-    ├── enemybite.mp3        # Player bitten by enemy
-    ├── kill.mp3             # Player kills an AI snake
-    ├── gameover.mp3         # Death / game over
-    ├── magnet.mp3           # Magnet power-up active
-    ├── lifeline.mp3         # Lifeline power-up active
-    ├── bossroar.mp3         # Titan Serpent (boss) spawn
-    └── bosskill.mp3         # Titan Serpent defeated
-```
-
-```
-/ (project root)
+Snakerush Game
 │
 ├── index.html                          ← main game page
 ├── privacy.html                        ← Privacy Policy page (for Play Store listing)
 ├── site.webmanifest                    ← PWA manifest
 ├── sw.js                               ← Service worker (offline caching)
 ├── favicon.ico                         ← multi-res favicon (16/32/48)
-│
 ├── robots.txt
 ├── sitemap.xml
 ├── googledecff8a97b3b7f45.html # Google Search Console verification
+│
 ├── css/
 │   └── style.css                       ← all game + menu + settings styling
 │
