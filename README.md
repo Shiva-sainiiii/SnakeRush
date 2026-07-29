@@ -48,6 +48,61 @@ SnakeRush/
     └── bosskill.mp3         # Titan Serpent defeated
 ```
 
+```
+/ (project root)
+│
+├── index.html                          ← main game page
+├── privacy.html                        ← Privacy Policy page (for Play Store listing)
+├── site.webmanifest                    ← PWA manifest
+├── sw.js                               ← Service worker (offline caching)
+├── favicon.ico                         ← multi-res favicon (16/32/48)
+│
+├── css/
+│   └── style.css                       ← all game + menu + settings styling
+│
+├── js/
+│   ├── game_part1.js                   ← constants, Settings, AudioManager,
+│   │                                       AnimalSoundManager, SpatialGrid
+│   ├── game_part2.js                   ← Food, Snake, PlayerSnake, AISnake,
+│   │                                       species definitions
+│   ├── game_part3.js                   ← Game class: input, spawning,
+│   │                                       collisions, UI wiring
+│   ├── game_part4.js                   ← Game class: rendering (_render,
+│   │                                       _drawMinimap, _drawFullMap)
+│   └── game_part5.js                   ← (small tail-end file, unmodified
+│                                            from your original upload)
+│
+└── assets/
+    ├── favicon-16.png                  ← standard icon, 16x16
+    ├── favicon-32.png                  ← standard icon, 32x32
+    ├── favicon-192.png                 ← standard icon, 192x192 (manifest "any")
+    ├── favicon-512.png                 ← standard icon, 512x512 (manifest "any")
+    ├── favicon-192-maskable.png        ← Android adaptive icon, 192x192 (manifest "maskable")
+    ├── favicon-512-maskable.png        ← Android adaptive icon, 512x512 (manifest "maskable")
+    ├── apple-touch-icon.png            ← iOS home-screen icon, 180x180
+    │
+    └── sounds/
+        └── animals/
+            ├── README.txt              ← lists exact filenames needed
+            ├── cow.mp3                 ← ⚠️ YOU need to add these —
+            ├── cat.mp3                    not included, game looks for
+            ├── dog.mp3                    them by these exact names
+            ├── lion.mp3                   (see ANIMAL_SOUND_MAP in
+            ├── tiger.mp3                  game_part1.js to add more)
+            ├── wolf.mp3
+            ├── bear.mp3
+            ├── polarbear.mp3
+            ├── koala.mp3
+            ├── panda.mp3
+            ├── hamster.mp3
+            ├── mouse.mp3
+            ├── rabbit.mp3
+            ├── fox.mp3
+            ├── pig.mp3
+            ├── frog.mp3
+            └── monkey.mp3
+```
+
 > Script load order matters — `js/game_part1.js` through `game_part5.js` must load in sequence (see `<script>` tags in `index.html`), since later parts depend on classes/constants defined earlier.
 
 ---
