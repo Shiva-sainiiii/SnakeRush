@@ -5,7 +5,7 @@
 // serving a stale game forever). Bump CACHE_VERSION on every deploy that
 // changes any of the precached files — that's what forces old clients to
 // pick up the new version instead of serving a cached copy indefinitely.
-const CACHE_VERSION = 'snake-rush-v1';
+const CACHE_VERSION = 'snake-rush-v2';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -18,6 +18,8 @@ const APP_SHELL = [
   '/site.webmanifest',
   '/assets/favicon-192.png',
   '/assets/favicon-512.png',
+  '/assets/favicon-192-maskable.png',
+  '/assets/favicon-512-maskable.png',
   '/assets/apple-touch-icon.png',
 ];
 
