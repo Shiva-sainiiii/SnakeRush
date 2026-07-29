@@ -327,18 +327,20 @@ body::after {
    ═══════════════════════════════════════════════════════════════ */
 
 :root {
-  --ink:        #000000;
-  --panel:      #0d0d0d;
-  --panel-2:    #131313;
-  --line:       #262626;
+  --ink:        #060907;   /* base canvas — slight green-black, not flat #000 */
+  --panel:      #0d130f;   /* primary surface — subtle green tint ties cards to the snake identity */
+  --panel-2:    #131a15;   /* nested/secondary surface, one step up from --panel */
+  --line:       rgba(126,255,178,0.12);  /* hairline — green-tinted, not disconnected gray */
+  --line-strong: rgba(126,255,178,0.28); /* for borders that need more presence (active states) */
   --green:      #39ff6a;   /* primary accent — solid, no alpha */
   --green-dim:  #1f8a42;
+  --green-soft: #7effb2;   /* secondary emphasis — matches player head color elsewhere in-game */
   --amber:      #ffb300;   /* secondary accent */
   --red:        #ff3b3b;
   --blue:       #2fb8ff;
   --purple:     #b06bff;
-  --text:       #f2f2f2;
-  --text-dim:   #9a9a9a;
+  --text:       #eef5f0;   /* faint green-white, not flat gray */
+  --text-dim:   #869e8f;   /* green-gray, ties dim text into the palette */
 }
 
 #overlay {
@@ -348,7 +350,9 @@ body::after {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  background: var(--ink);
+  background:
+    radial-gradient(ellipse 900px 500px at 50% -8%, rgba(57,255,106,0.07), transparent 60%),
+    var(--ink);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   padding:
@@ -356,6 +360,33 @@ body::after {
     max(14px, env(safe-area-inset-right))
     max(28px, calc(env(safe-area-inset-bottom) + 16px))
     max(14px, env(safe-area-inset-left));
+}
+
+/* Faint drifting dot-field — echoes the game world's own particle
+   texture (visible once you're playing) so the menu reads as sitting
+   inside the same world rather than a flat page bolted in front of it.
+   Two layers at different dot sizes/speeds for subtle parallax depth. */
+#overlay::before {
+  content: '';
+  position: fixed;
+  inset: -10% -10%;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(rgba(126,255,178,0.16) 1px, transparent 1px),
+    radial-gradient(rgba(126,255,178,0.09) 1px, transparent 1px);
+  background-size: 46px 46px, 74px 74px;
+  background-position: 0 0, 20px 30px;
+  animation: overlay-drift 90s linear infinite;
+}
+
+@keyframes overlay-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(-46px, -74px, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #overlay::before { animation: none; }
 }
 
 #overlay-scroll {
@@ -419,10 +450,12 @@ body::after {
 .icon-btn.active { border-color: var(--green); }
 
 #overlay-title {
+  font-family: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
   font-size: clamp(1.55rem, 7.3vw, 3.2rem);
-  font-weight: 900;
-  letter-spacing: 0.03em;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--green);
+  text-shadow: 0 0 28px rgba(57,255,106,0.25);
   line-height: 1;
   white-space: nowrap;
 }
@@ -430,7 +463,7 @@ body::after {
 @media (max-width: 360px) {
   #overlay-title {
     font-size: clamp(1.3rem, 7vw, 3.2rem);
-    letter-spacing: 0.01em;
+    letter-spacing: -0.005em;
   }
 }
 
@@ -490,7 +523,9 @@ body::after {
   outline: none;
 }
 
-/* Play button — solid, punchy, no glow-blur soup */
+/* Play button — solid, punchy, one deliberate signature motion: a slow,
+   low-amplitude breathing glow that reads as "alive" without being a
+   flashy neon pulse. Everything else on the page stays still. */
 #start-btn {
   margin-top: 2px;
   padding: 13px 56px;
@@ -504,6 +539,16 @@ body::after {
   border-radius: 999px;
   cursor: pointer;
   transition: transform 0.1s ease, background 0.15s ease;
+  animation: start-btn-breathe 3.2s ease-in-out infinite;
+}
+
+@keyframes start-btn-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(57,255,106,0.35); }
+  50%      { box-shadow: 0 0 0 10px rgba(57,255,106,0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #start-btn { animation: none; }
 }
 
 #start-btn:hover { background: #55ff85; }
@@ -610,8 +655,9 @@ body::after {
   gap: 14px;
   padding: 14px 18px;
   border-radius: 12px;
-  background: var(--panel);
-  border: 2px solid var(--line);
+  background: rgba(13,19,15,0.6);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--line);
   opacity: 0;
   transform: translateY(8px);
   pointer-events: none;
@@ -622,7 +668,7 @@ body::after {
   opacity: 1;
   transform: translateY(0);
   pointer-events: auto;
-  border-color: var(--green-dim);
+  border-color: var(--line-strong);
 }
 
 .hint-icon {
@@ -661,15 +707,29 @@ body::after {
 
 /* ── Feature card — mode select + power summary chips ───────── */
 #feature-card {
+  position: relative;
   width: 100%;
   background: var(--panel);
-  border: 2px solid var(--line);
+  border: 1px solid var(--line);
   border-radius: 14px;
-  padding: 16px 16px 18px;
+  padding: 17px 16px 18px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   margin-top: 10px;
+  overflow: hidden;
+}
+
+/* Thin top-edge accent line — a quiet structural cue that this card
+   holds the game's core rules/settings, without adding another full
+   border weight competing with the hero above it. */
+#feature-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--green-dim) 20%, var(--green) 50%, var(--green-dim) 80%, transparent);
+  opacity: 0.55;
 }
 
 .feature-card-header {
@@ -740,7 +800,7 @@ body::after {
 
 .daily-toggle[aria-pressed="true"] {
   border-color: var(--green);
-  background: rgba(126, 255, 178, 0.08);
+  background: rgba(126, 255, 178, 0.08); /* --green-soft at low alpha */
 }
 
 .daily-toggle-icon { font-size: 1.1rem; flex-shrink: 0; }
@@ -841,7 +901,8 @@ body::after {
 #settings-modal-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0,0,0,0.82);
+  background: rgba(2,4,3,0.86);
+  backdrop-filter: blur(2px);
 }
 
 /* ── Settings Panel ──────────────────────────────────────────── */
@@ -852,12 +913,13 @@ body::after {
   max-height: 85svh;
   overflow-y: auto;
   background: var(--panel);
-  border: 2px solid var(--line);
+  border: 1px solid var(--line);
   border-radius: 16px;
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(126,255,178,0.04);
 }
 
 .settings-header {
