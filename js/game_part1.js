@@ -85,6 +85,7 @@ const Settings = {
   mode:        'classic',   // 'classic' | 'timetrial'
   gyro:        false,
   face:        null,        // emoji face for player's head, null = classic eyes
+  animalSounds: false,      // periodic animal SFX for animal-mapped faces — off by default
 };
 
 /* Persist a subset of Settings across sessions (design choice, sensitivity,
@@ -98,6 +99,7 @@ const Settings = {
     if (typeof stored.sensitivity === 'number') Settings.sensitivity = stored.sensitivity;
     if (stored.mode === 'classic' || stored.mode === 'timetrial') Settings.mode = stored.mode;
     if (typeof stored.face === 'string' || stored.face === null) Settings.face = stored.face;
+    if (typeof stored.animalSounds === 'boolean') Settings.animalSounds = stored.animalSounds;
   } catch(_) {}
 })();
 
@@ -105,7 +107,7 @@ function savePersistedSettings() {
   try {
     SafeStorage.setItem(SETTINGS_KEY, JSON.stringify({
       design: Settings.design, sensitivity: Settings.sensitivity, mode: Settings.mode,
-      face: Settings.face,
+      face: Settings.face, animalSounds: Settings.animalSounds,
     }));
   } catch(_) {}
 }
@@ -768,13 +770,12 @@ const FREEZE_DURATION        = 2.5;  // 🧊 seconds the player is frozen solid
 // Normal food is skinned as a random creepy-crawly instead of a plain
 // dot — purely cosmetic, picked once per food item and kept fixed for
 // its lifetime (so it doesn't flicker between bugs every frame).
-const FOOD_BUG_EMOJIS = ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚪', '🟥', '🟧', '🟨'];
- 
+const FOOD_BUG_EMOJIS = ['🕷️', '🪳', '🪰', '🐝', '🐞', '🦟', '🪲', '🦗', '🐜', '🦂', '🦀'];
 
 // During the Food Rain event, normal food spawns as a dessert instead of
 // a bug — reads as a "treat shower" rather than more bugs falling from
 // the sky.
-const FOOD_RAIN_EMOJIS =['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚪', '🟥', '🟧', '🟨'];
+const FOOD_RAIN_EMOJIS = ['🍭', '🍰', '🍕', '🍔', '🥪', '🍓', '🍊', '🍎', '🥭', '🧀', '🍐'];
 
 const NEAR_SNAKE_RADIUS  = 100;
 const DANGER_ZONE_DIST   = 250;
@@ -1223,7 +1224,8 @@ const AnimalSoundManager = {
   },
 
   // Call every frame from PlayerSnake.update(). Only actually does
-  // anything when the player has an animal-mapped face selected.
+  // anything when the player has an animal-mapped face selected AND has
+  // opted in via Settings.animalSounds (off by default).
   tick(dt, face) {
     if (face !== this._lastFace) {
       // Face changed (or cleared) — reset the timer fresh rather than
@@ -1232,6 +1234,8 @@ const AnimalSoundManager = {
       this._sinceLast = 0;
       this._nextInterval = this._pickInterval();
     }
+    if (!Settings.animalSounds) return;
+
     const soundName = ANIMAL_SOUND_MAP[face];
     if (!soundName) return;
 

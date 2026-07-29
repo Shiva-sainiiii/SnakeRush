@@ -75,20 +75,6 @@ class Food {
       [FOOD_TYPE.FREEZE]:   '#7fdfff',
     };
     this.color = colors[type] || color;
-
-    // Cosmetic emoji drawn on top of normal food — a random bug normally,
-    // or a random dessert when spawned as part of a Food Rain event.
-    // Picked once here and cached rather than per-frame so a given food
-    // item keeps the same look for its whole lifetime instead of
-    // flickering between bugs every draw call.
-    if (type === FOOD_TYPE.NORMAL) {
-      const pool = useRainEmoji ? FOOD_RAIN_EMOJIS : FOOD_BUG_EMOJIS;
-      this.emoji = pool[Math.floor(Math.random() * pool.length)];
-      this.isBug = !useRainEmoji;
-    } else {
-      this.emoji = null;
-      this.isBug = false;
-    }
   }
 
   get expired() { return this.ttl !== null && this.ttl <= 0; }
@@ -111,43 +97,12 @@ class Food {
     ctx.globalAlpha = alpha;
 
     if (this.type === FOOD_TYPE.NORMAL) {
-      const img = EmojiIconCache.get(this.emoji);
-      if (img) {
-        // Bug emoji (🕷️🪳🪰 etc.) skew dark/brown/black, which barely
-        // shows up against the dark game background — unlike dessert
-        // emoji (food rain) which are bright and don't need this boost.
-        // A bright halo ring behind the emoji (not just a soft shadow
-        // blur) gives it a visible "plate" to sit on regardless of the
-        // emoji's own colors, and the whole thing is drawn noticeably
-        // bigger so it doesn't get lost against the background either.
-        const isBug = this.isBug;
-        ctx.save();
-        if (isBug) {
-          ctx.shadowColor = this.color; ctx.shadowBlur = 14 + pulse * 8;
-          ctx.beginPath(); ctx.arc(sx, sy, r * 1.15, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255,255,255,${(0.22 + pulse * 0.12).toFixed(2)})`;
-          ctx.fill();
-          ctx.shadowBlur = 0;
-          ctx.beginPath(); ctx.arc(sx, sy, r * 0.95, 0, Math.PI * 2);
-          ctx.strokeStyle = this.color; ctx.lineWidth = 1.5;
-          ctx.globalAlpha = alpha * (0.5 + pulse * 0.3);
-          ctx.stroke();
-          ctx.globalAlpha = alpha;
-        } else {
-          ctx.shadowColor = this.color; ctx.shadowBlur = 6 + pulse * 5;
-        }
-        const drawSize = isBug ? r * 3.6 : r * 2.6;
-        ctx.drawImage(img, sx - drawSize / 2, sy - drawSize / 2, drawSize, drawSize);
-        ctx.restore();
-      } else {
-        // Fallback (emoji cache miss) — old plain glowing dot.
-        ctx.shadowColor = this.color; ctx.shadowBlur = 8 + pulse * 6;
-        ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2);
-        ctx.fillStyle = this.color; ctx.fill();
-        ctx.shadowBlur = 0;
-        ctx.beginPath(); ctx.arc(sx, sy, r * 0.45, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fill();
-      }
+      ctx.shadowColor = this.color; ctx.shadowBlur = 8 + pulse * 6;
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fillStyle = this.color; ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.beginPath(); ctx.arc(sx, sy, r * 0.45, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fill();
 
     } else if (this.type === FOOD_TYPE.MAGNET) {
       const spin = Date.now() * 0.003;

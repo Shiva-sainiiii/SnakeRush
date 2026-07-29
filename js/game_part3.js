@@ -471,6 +471,22 @@ class Game {
     // Snake face emoji selector — free for everyone, no unlock gating.
     this._renderFaceSelector();
 
+    // Animal sounds toggle — off by default (see Settings.animalSounds).
+    const animalSoundsBtn = document.getElementById('setting-animal-sounds');
+    if (animalSoundsBtn) {
+      const syncBtn = () => {
+        animalSoundsBtn.textContent = Settings.animalSounds ? 'ON' : 'OFF';
+        animalSoundsBtn.classList.toggle('active', Settings.animalSounds);
+        animalSoundsBtn.setAttribute('aria-pressed', String(Settings.animalSounds));
+      };
+      syncBtn();
+      animalSoundsBtn.addEventListener('click', () => {
+        Settings.animalSounds = !Settings.animalSounds;
+        syncBtn();
+        savePersistedSettings();
+      });
+    }
+
     // Mode buttons
     const modeBtns = document.querySelectorAll('.mode-btn');
     const modeDescEl = document.getElementById('mode-desc');

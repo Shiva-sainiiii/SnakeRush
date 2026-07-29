@@ -363,24 +363,64 @@ Object.assign(Game.prototype, {
       ctx.fillRect(toX(f.pos.x) - 0.75, toY(f.pos.y) - 0.75, 1.5, 1.5);
     }
 
-    // Snakes — collect list rows alongside drawing so both stay in sync
-    // and we only walk this.snakes once.
+    // Snakes — drawn as their actual body shape (a stroked path through
+    // the segment chain) rather than just a head dot, so length/shape is
+    // visible at a glance on the full map. List rows are collected
+    // alongside drawing so both stay in sync and we only walk
+    // this.snakes once.
     const rows = [];
+
+    // Segments are sampled rather than every single one drawn — at this
+    // zoom level (whole 11000x11000 world in a phone-sized canvas)
+    // individual segments are sub-pixel anyway, and a long snake can have
+    // 100+ segments; sampling keeps this cheap regardless of snake count
+    // or length while still tracing the true shape/curve of the body.
+    const SAMPLE_STEP = 3;
+
+    const drawSnakeShape = (s, color, lineWidth) => {
+      const segs = s.segments;
+      if (!segs || segs.length < 2) return;
+      ctx.beginPath();
+      ctx.moveTo(toX(segs[0].x), toY(segs[0].y));
+      for (let i = SAMPLE_STEP; i < segs.length; i += SAMPLE_STEP) {
+        ctx.lineTo(toX(segs[i].x), toY(segs[i].y));
+      }
+      // Always include the true tail end even if it fell between samples,
+      // so the drawn length always matches the snake's actual length.
+      const last = segs[segs.length - 1];
+      ctx.lineTo(toX(last.x), toY(last.y));
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lineWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    };
 
     for (let i = 1; i < this.snakes.length; i++) {
       const s = this.snakes[i];
       if (!s.alive) continue;
-      const sx = toX(s.head.x), sy = toY(s.head.y);
 
+      let color;
       if (s.isBoss) {
         const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.006);
-        ctx.fillStyle = `rgba(255,${Math.round(60 + pulse * 100)},20,1)`;
+        color = `rgba(255,${Math.round(60 + pulse * 100)},20,1)`;
       } else {
-        ctx.fillStyle = s.headColor;
+        color = s.headColor;
       }
+      // Reuse the same getSegmentR() helper the real game uses for body
+      // thickness (accounts for species radiusMul, girth-from-length, and
+      // skin design), scaled down by the map's zoom factor, with a floor
+      // so thin/far-away snakes stay visible at this zoom level.
+      const worldRadius = getSegmentR(s) * (s.isBoss ? 1.35 : 1);
+      const bodyWidth = Math.max(2.5, worldRadius * 2 * scale);
+      drawSnakeShape(s, color, bodyWidth);
+
+      // Small head dot at the front so direction/head position is still
+      // clearly distinguishable from the rest of the body trail.
+      const hx = toX(s.head.x), hy = toY(s.head.y);
       ctx.beginPath();
-      const dotR = s.isBoss ? 7 : Math.max(2.5, 3.5 * (s.radiusMul || 1));
-      ctx.arc(sx, sy, dotR, 0, Math.PI * 2);
+      ctx.arc(hx, hy, Math.max(2.5, bodyWidth * 0.7), 0, Math.PI * 2);
+      ctx.fillStyle = color;
       ctx.fill();
 
       rows.push({
@@ -393,10 +433,14 @@ Object.assign(Game.prototype, {
     }
 
     if (this.player && this.player.alive) {
+      const worldRadius = getSegmentR(this.player);
+      const bodyWidth = Math.max(3, worldRadius * 2 * scale);
+      drawSnakeShape(this.player, '#39ff6a', bodyWidth);
+
       const px = toX(this.player.head.x), py = toY(this.player.head.y);
       ctx.fillStyle = '#7effb2'; ctx.shadowColor = '#7effb2'; ctx.shadowBlur = 8;
       ctx.beginPath();
-      ctx.arc(px, py, 6, 0, Math.PI * 2);
+      ctx.arc(px, py, Math.max(3, bodyWidth * 0.8), 0, Math.PI * 2);
       ctx.fill();
       ctx.shadowBlur = 0;
 
