@@ -50,6 +50,15 @@
   <link rel="manifest" href="/site.webmanifest" />
   <meta name="theme-color" content="#050a0f" />
 
+  <!-- PWA / "Add to Home Screen" support. iOS ignores manifest.json's
+       display:standalone, so these apple-specific tags are what actually
+       make the game launch fullscreen (no Safari chrome) and use the
+       right status-bar style when added to an iPhone/iPad home screen. -->
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Snake Rush" />
+
   <!-- Open Graph (Facebook, WhatsApp, Discord, LinkedIn previews) -->
   <meta property="og:type" content="website" />
   <meta property="og:title" content="Snake Rush — Free Online Snake Game" />
@@ -602,6 +611,21 @@
       }
       requestAnimationFrame(tick);
     });
+  </script>
+
+  <!-- Service worker registration — enables offline play and is required
+       for the "installable PWA" checks that Play Store TWA wrapping
+       tools (e.g. Bubblewrap/PWABuilder) verify before packaging. Runs
+       after 'load' so it never competes with the game's own startup for
+       the main thread. -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch((err) => {
+          console.warn('[SW] registration failed:', err);
+        });
+      });
+    }
   </script>
 </body>
 </html>
