@@ -729,8 +729,8 @@ const MAGNET_PULL_FORCE  = 220;
 // still technically being pulled. PASSIVE_MAGNET_MIN_STRENGTH sets a floor
 // so pull is meaningful across the whole radius, not just right next to
 // the head.
-const PASSIVE_MAGNET_RADIUS       = 50;   // tight but actually functional (> eat radius)
-const PASSIVE_MAGNET_FORCE        = 50;
+const PASSIVE_MAGNET_RADIUS       = 10;   // tight but actually functional (> eat radius)
+const PASSIVE_MAGNET_FORCE        = 500;
 const PASSIVE_MAGNET_MIN_STRENGTH = 0.9;
 const ATTACK_DURATION    = 8;
 const SHIELD_DURATION    = 4;
