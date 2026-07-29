@@ -731,7 +731,7 @@ const MAGNET_PULL_FORCE  = 220;
 // the head.
 const PASSIVE_MAGNET_RADIUS       = 30;   // tight but actually functional (> eat radius)
 const PASSIVE_MAGNET_FORCE        = 100;
-const PASSIVE_MAGNET_MIN_STRENGTH = 0.2;
+const PASSIVE_MAGNET_MIN_STRENGTH = 0.7;
 const ATTACK_DURATION    = 8;
 const SHIELD_DURATION    = 4;
 const GHOST_DURATION     = 4;
