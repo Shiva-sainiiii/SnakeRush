@@ -1608,3 +1608,333 @@ body::after {
   border-color: rgba(255,100,100,0.25);
 }
 .pause-menu-btn-danger:active { background: rgba(255,80,80,0.15); }
+
+/* ═══════════════════════════════════════════════════════════════
+   MULTIPLAYER — entry button, lobby overlay, in-match HUD/canvas.
+   Deliberately mirrors the settings-modal / daily-toggle visual
+   patterns above rather than inventing a new style language, since
+   this is still "the same app", just a different mode.
+═══════════════════════════════════════════════════════════════ */
+
+/* ── Entry point button (start screen, feature card) ─────────── */
+.mp-open-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1.5px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.mp-open-btn:hover { border-color: var(--green-dim); }
+.mp-open-icon { font-size: 1.1rem; flex-shrink: 0; }
+.mp-open-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.mp-open-title { font-size: 0.78rem; font-weight: 700; }
+.mp-open-sub {
+  font-size: 0.64rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Lobby overlay (create/join room) ─────────────────────────── */
+#mp-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+#mp-overlay.hidden { display: none; }
+
+#mp-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2,4,3,0.86);
+  backdrop-filter: blur(2px);
+}
+
+#mp-panel {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  max-height: 85svh;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(126,255,178,0.04);
+}
+
+.mp-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: var(--green);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+.mp-header-icon { font-size: 1rem; }
+#mp-close-btn {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#mp-close-btn:hover { color: var(--text); }
+
+.mp-status {
+  font-size: 0.76rem;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(255,179,0,0.1);
+  border: 1px solid rgba(255,179,0,0.3);
+  color: #ffd27a;
+}
+.mp-status.mp-status--error {
+  background: rgba(255,60,60,0.1);
+  border-color: rgba(255,60,60,0.35);
+  color: #ff9a9a;
+}
+.mp-status.hidden { display: none; }
+
+.mp-step { display: flex; flex-direction: column; gap: 10px; }
+.mp-step.hidden { display: none; }
+
+.mp-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 14px;
+  border-radius: 12px;
+  border: 1.5px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+}
+.mp-action-btn:hover { border-color: var(--green-dim); }
+.mp-action-btn:active { transform: scale(0.98); }
+
+.mp-action-btn--primary {
+  background: var(--green);
+  border-color: var(--green);
+  color: #000;
+  font-weight: 700;
+  justify-content: center;
+}
+.mp-action-btn--primary:hover { background: #55ff85; }
+.mp-action-btn--primary .mp-action-sub { color: rgba(0,0,0,0.6); }
+
+.mp-action-icon { font-size: 1.3rem; flex-shrink: 0; }
+.mp-action-title { display: block; font-size: 0.86rem; font-weight: 700; }
+.mp-action-sub { display: block; font-size: 0.68rem; color: var(--text-dim); margin-top: 1px; }
+
+.mp-server-details {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+.mp-server-details summary {
+  cursor: pointer;
+  padding: 6px 2px;
+  list-style: none;
+}
+.mp-server-details summary::-webkit-details-marker { display: none; }
+.mp-server-label {
+  display: block;
+  margin: 8px 0 4px;
+  font-size: 0.68rem;
+}
+.mp-server-input {
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1.5px solid var(--line);
+  background: var(--ink);
+  color: var(--text);
+  font-size: 0.78rem;
+}
+.mp-server-input:focus { border-color: var(--green-dim); outline: none; }
+
+.mp-code-label {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+.mp-code-input {
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1.5px solid var(--line);
+  background: var(--panel-2);
+  color: var(--green);
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: 0.3em;
+  text-align: center;
+  text-transform: uppercase;
+  font-family: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+}
+.mp-code-input:focus { border-color: var(--green); outline: none; }
+
+.mp-back-btn {
+  width: 100%;
+  padding: 10px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.mp-back-btn:hover { color: var(--text); }
+
+.mp-waiting-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  text-align: center;
+}
+.mp-room-code {
+  font-family: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+  font-size: 2.2rem;
+  font-weight: 800;
+  letter-spacing: 0.25em;
+  color: var(--green);
+  text-shadow: 0 0 24px rgba(57,255,106,0.25);
+  text-align: center;
+  padding: 6px 0;
+}
+.mp-copy-btn {
+  width: 100%;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1.5px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.mp-copy-btn:hover { border-color: var(--green-dim); }
+.mp-copy-btn.mp-copied { border-color: var(--green); color: var(--green); }
+
+.mp-player-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.mp-player-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  font-size: 0.8rem;
+}
+.mp-player-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.mp-waiting-hint {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-align: center;
+  margin-top: 2px;
+}
+
+/* ── In-match HUD ──────────────────────────────────────────────── */
+#mp-hud {
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
+  left: max(14px, env(safe-area-inset-left));
+  right: max(14px, env(safe-area-inset-right));
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  pointer-events: none;
+}
+#mp-hud.hidden { display: none; }
+#mp-hud > * { pointer-events: auto; }
+
+#mp-hud-room, #mp-hud-length, #mp-hud-status {
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(13,19,15,0.75);
+  backdrop-filter: blur(4px);
+  border: 1px solid var(--line);
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+#mp-hud-room { color: var(--green-soft); }
+
+#mp-hud-boost {
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(13,19,15,0.75);
+  backdrop-filter: blur(4px);
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+#mp-hud-boost.hud-boost-active {
+  background: rgba(255,179,0,0.18);
+  border-color: rgba(255,179,0,0.45);
+  color: #ffd27a;
+}
+
+#mp-exit-btn {
+  margin-left: auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: rgba(13,19,15,0.75);
+  backdrop-filter: blur(4px);
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#mp-exit-btn:hover { color: #ff9a9a; border-color: rgba(255,100,100,0.35); }
+
+#mp-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: block;
+  background: var(--ink);
+}
+#mp-canvas.hidden { display: none; }
