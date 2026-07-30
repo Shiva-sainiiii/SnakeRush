@@ -166,6 +166,18 @@
         </div>
         <div id="mode-desc" class="mode-desc">Eat food, grow big, outlast 10 AI snakes. 3 lives.</div>
 
+        <!-- Real-time multiplayer entry point — opens #mp-overlay. This is
+             a fully separate path from Classic/Time Trial (see mp.js): it
+             doesn't touch Settings.mode or the single-player Game class
+             at all, it connects to an external Node.js server instead. -->
+        <button id="mp-open-btn" class="mp-open-btn">
+          <span class="mp-open-icon">👥</span>
+          <span class="mp-open-text">
+            <span class="mp-open-title">Play with Friends</span>
+            <span class="mp-open-sub">Real-time · private room code</span>
+          </span>
+        </button>
+
         <!-- Daily Challenge: a seeded-RNG modifier on top of Classic mode
              (same AI count/food/world size/power-ups for everyone on a
              given day), not a separate mode value. Toggled independently
@@ -329,6 +341,79 @@
 
   <canvas id="game-canvas" style="touch-action:none;"></canvas>
 
+  <!-- Multiplayer HUD — deliberately separate element from #hud so
+       single-player's HUD logic (game_part3.js/game_part4.js) never has
+       to branch on "am I in multiplayer". mp.js owns this one entirely. -->
+  <div id="mp-hud" class="hidden">
+    <span id="mp-hud-room">Room: -----</span>
+    <span id="mp-hud-length">Length: 8</span>
+    <span id="mp-hud-status"></span>
+    <button id="mp-hud-boost" class="hud-boost-off">⚡ Hold to boost</button>
+    <button id="mp-exit-btn" aria-label="Leave match" title="Leave">✕</button>
+  </div>
+
+  <canvas id="mp-canvas" class="hidden" style="touch-action:none;"></canvas>
+
+  <!-- Multiplayer lobby — create or join a private room. This is a
+       standalone flow (see mp.js): it never touches Settings.mode or the
+       single-player Game class. Connecting is opt-in and only happens
+       when the player explicitly opens this screen. -->
+  <div id="mp-overlay" class="hidden">
+    <div id="mp-backdrop"></div>
+    <div id="mp-panel" role="dialog" aria-label="Play with friends">
+      <div class="mp-header">
+        <span class="mp-header-icon">👥</span>
+        <span>Play with Friends</span>
+        <button id="mp-close-btn" aria-label="Close">✕</button>
+      </div>
+
+      <div id="mp-status" class="mp-status hidden"></div>
+
+      <!-- Step 1: choose create or join -->
+      <div id="mp-step-choose" class="mp-step">
+        <button id="mp-create-btn" class="mp-action-btn mp-action-btn--primary">
+          <span class="mp-action-icon">➕</span>
+          <span>
+            <span class="mp-action-title">Create Room</span>
+            <span class="mp-action-sub">Get a code to share with friends</span>
+          </span>
+        </button>
+        <button id="mp-join-btn" class="mp-action-btn">
+          <span class="mp-action-icon">🔑</span>
+          <span>
+            <span class="mp-action-title">Join Room</span>
+            <span class="mp-action-sub">Enter a friend's room code</span>
+          </span>
+        </button>
+
+        <details id="mp-server-details" class="mp-server-details">
+          <summary>Server settings</summary>
+          <label class="mp-server-label" for="mp-server-url">Server URL</label>
+          <input id="mp-server-url" class="mp-server-input" type="text" spellcheck="false" autocapitalize="off" />
+        </details>
+      </div>
+
+      <!-- Step 2a: join — code entry -->
+      <div id="mp-step-join" class="mp-step hidden">
+        <label class="mp-code-label" for="mp-code-input">Room Code</label>
+        <input id="mp-code-input" class="mp-code-input" type="text" maxlength="5" autocapitalize="characters" spellcheck="false" placeholder="ABCDE" />
+        <button id="mp-join-confirm-btn" class="mp-action-btn mp-action-btn--primary">Join</button>
+        <button id="mp-join-back-btn" class="mp-back-btn">← Back</button>
+      </div>
+
+      <!-- Step 2b: waiting room — shown after create/join succeeds, until
+           gameplay actually starts (2nd player joining starts it). -->
+      <div id="mp-step-waiting" class="mp-step hidden">
+        <div class="mp-waiting-label">Room Code</div>
+        <div id="mp-room-code" class="mp-room-code">-----</div>
+        <button id="mp-copy-code-btn" class="mp-copy-btn">📋 Copy Code</button>
+        <div id="mp-player-list" class="mp-player-list"></div>
+        <p class="mp-waiting-hint">Game starts automatically once a friend joins.</p>
+        <button id="mp-leave-btn" class="mp-back-btn">Leave Room</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Fullscreen minimap — opened by tapping the small minimap in the
        corner of the game canvas. The canvas fills the entire panel;
        the header and snake-list are floated on top of it as overlays
@@ -364,6 +449,15 @@
   <script src="js/game_part3.js"></script>
   <script src="js/game_part4.js"></script>
   <script src="js/game_part5.js"></script>
+
+  <!-- Multiplayer client — fully independent of the single-player Game
+       class above. Owns its own canvas (#mp-canvas), its own HUD
+       (#mp-hud), and its own WebSocket connection to the Phase-1
+       server. Loaded after the single-player files so it can reuse a
+       couple of small utilities (Vector2, getPlayerName) that already
+       exist there, but it never reads or writes single-player game
+       state. -->
+  <script src="js/mp.js"></script>
 
   <!-- Settings modal open/close — gear icon on hero opens it as a
        centered overlay; tapping the backdrop or the ✕ closes it. -->
