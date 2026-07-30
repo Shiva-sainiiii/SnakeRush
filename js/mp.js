@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   MULTIPLAYER CLIENT (Phase 2)
+   MULTIPLAYER CLIENT (Phase 2 networking + Phase 3 render polish)
 
    Fully independent of the single-player Game class in game_part1-5.js.
    This file owns:
@@ -8,13 +8,16 @@
      - The in-match renderer (#mp-canvas) and HUD (#mp-hud)
      - Touch/mouse steering input, sent to the server every frame
 
-   Deliberate scope for Phase 2: prove the networking + server-
-   authoritative simulation works end-to-end with real players. Visuals
-   are intentionally simple (plain snakes, plain food circles) because
-   the server doesn't simulate AI/power-ups/skins yet either — adding
-   fancier client-side visuals for things the server can't back would
-   just be misleading. Phase 3 brings those into the server, and this
-   file's render code will grow to match.
+   Phase 3 additions: client-side interpolation between server snapshots
+   (the server only broadcasts at 20 ticks/sec, so without this every
+   snake visibly steps instead of gliding — see _getInterpolatedWorld),
+   and batched rendering (one beginPath()/fill() per snake/food group
+   instead of one per segment/item, which was the other real cost behind
+   the reported lag).
+
+   Visuals are still intentionally simpler than single-player (no AI,
+   power-ups, or skins) because the server doesn't simulate those yet
+   either — that's Phase 4, once this pass proves out smoothly.
 
    This never touches `Settings`, `window._game`, or any single-player
    state. The two modes are only connected by both being reachable from
@@ -30,10 +33,16 @@ const MP = {
   connected: false,
   inMatch: false,
 
-  // Latest world snapshot from the server. Rendered as-is — no client-
-  // side prediction/interpolation in Phase 2 (that's a Phase 3 polish
-  // item once the basic sync is proven out).
-  world: { snakes: [], food: [] },
+  // Snapshot buffer for interpolation. The server broadcasts at 20
+  // ticks/sec (every 50ms), but the screen renders at 60fps — without
+  // interpolation, every snake would visibly "jump" between positions
+  // instead of gliding, which reads as lag even though the network
+  // itself is fine. We keep the two most recent snapshots and blend
+  // between them based on elapsed time, the same technique any
+  // real-time multiplayer game uses for this exact problem.
+  _prevSnapshot: null,   // { snakes, food, t } — older snapshot
+  _curSnapshot: null,    // { snakes, food, t } — newest snapshot
+  _serverTickMs: 50,     // matches TICK_MS on the server (20 ticks/sec)
 
   // Local input state
   _pointer: { x: 0, y: 0 },
@@ -252,7 +261,11 @@ const MP = {
         break;
 
       case 'state':
-        this.world = msg;
+        // Shift the buffer: what was "current" becomes "previous", and
+        // this new message becomes "current". Rendering blends between
+        // the two using elapsed wall-clock time (see _getInterpolatedWorld).
+        this._prevSnapshot = this._curSnapshot;
+        this._curSnapshot = { snakes: msg.snakes, food: msg.food, t: performance.now() };
         this._updateWaitingList(msg.snakes);
         // Auto-start the match as soon as there are 2+ players and we're
         // still sitting in the lobby overlay — matches the "starts
@@ -333,6 +346,41 @@ const MP = {
     }
   },
 
+  // Blends between _prevSnapshot and _curSnapshot based on how much wall-
+  // clock time has passed since _curSnapshot arrived, relative to the
+  // server's own tick interval. This is what turns 20 discrete
+  // server updates/sec into smooth 60fps motion on screen instead of
+  // visible steps every ~50ms.
+  _getInterpolatedWorld() {
+    const cur = this._curSnapshot;
+    if (!cur) return { snakes: [], food: [] };
+    const prev = this._prevSnapshot;
+    if (!prev) return cur; // first snapshot ever — nothing to blend from yet
+
+    const elapsed = performance.now() - cur.t;
+    // Clamp slightly past 1.0 (not just to 1.0) so brief network hiccups
+    // don't cause a visible stall right as the next snapshot is due —
+    // the snake keeps extrapolating its last known heading a little
+    // rather than freezing dead still.
+    const t = Math.min(1.3, elapsed / this._serverTickMs);
+
+    const prevById = new Map(prev.snakes.map((s) => [s.id, s]));
+    const snakes = cur.snakes.map((curSnake) => {
+      const prevSnake = prevById.get(curSnake.id);
+      if (!prevSnake || !prevSnake.alive || !curSnake.alive) return curSnake;
+
+      const segCount = Math.min(prevSnake.segments.length, curSnake.segments.length);
+      const segments = curSnake.segments.map((seg, i) => {
+        if (i >= segCount) return seg; // newly-grown segment, no previous position to blend from
+        const p = prevSnake.segments[i];
+        return { x: p.x + (seg.x - p.x) * t, y: p.y + (seg.y - p.y) * t };
+      });
+      return { ...curSnake, segments };
+    });
+
+    return { snakes, food: cur.food };
+  },
+
   // ── Input ────────────────────────────────────────────────────
   _setupInput() {
     const canvas = this.el.canvas;
@@ -368,8 +416,8 @@ const MP = {
   },
 
   _sendInput() {
-    if (!this.inMatch) return;
-    const mine = this.world.snakes.find((s) => s.id === this.mySnakeId);
+    if (!this.inMatch || !this._curSnapshot) return;
+    const mine = this._curSnapshot.snakes.find((s) => s.id === this.mySnakeId);
     if (!mine || !mine.alive) return;
 
     // Steer toward the pointer relative to the snake's own head position
@@ -413,47 +461,115 @@ const MP = {
     const logW = this.el.canvas.width / dpr;
     const logH = this.el.canvas.height / dpr;
 
+    // Interpolated snapshot — this is the single fix that removes most
+    // of the perceived "lag": without it, positions only update every
+    // ~50ms (the server's tick rate) and every snake visibly steps
+    // between spots instead of gliding, even though the network itself
+    // is working fine.
+    const world = this._getInterpolatedWorld();
+
     ctx.fillStyle = '#060907';
     ctx.fillRect(0, 0, logW, logH);
 
-    const mine = this.world.snakes.find((s) => s.id === this.mySnakeId);
+    const mine = world.snakes.find((s) => s.id === this.mySnakeId);
     // Camera centers on the player's own snake; if dead, keep the camera
     // frozen at their last known head position so the death moment is
     // still watchable rather than snapping to (0,0).
     if (mine && mine.segments[0]) { this._camX = mine.segments[0].x - logW / 2; this._camY = mine.segments[0].y - logH / 2; }
     const camX = this._camX, camY = this._camY;
 
-    // Food
+    // Faint dot-grid background — matches the single-player world's own
+    // texture instead of a flat void, drawn as a single tiled pattern
+    // fill (one draw call) rather than per-dot, so it costs nothing
+    // meaningful even though it covers the whole screen.
+    this._drawBackgroundGrid(ctx, logW, logH, camX, camY);
+
+    // Food — single beginPath()/fill() for the whole batch instead of
+    // one per food item. This was the main render-cost issue: with ~80
+    // food items each doing their own beginPath+arc+fill, that's 80
+    // separate draw calls every frame just for food, before snakes are
+    // even drawn.
+    ctx.shadowColor = '#ffdd00';
+    ctx.shadowBlur = 8;
     ctx.fillStyle = '#ffdd00';
-    for (const f of this.world.food) {
+    ctx.beginPath();
+    for (const f of world.food) {
       const sx = f.x - camX, sy = f.y - camY;
       if (sx < -20 || sx > logW + 20 || sy < -20 || sy > logH + 20) continue;
-      ctx.beginPath();
+      ctx.moveTo(sx + 6, sy);
       ctx.arc(sx, sy, 6, 0, Math.PI * 2);
-      ctx.fill();
     }
+    ctx.fill();
+    ctx.shadowBlur = 0;
 
-    // Snakes
-    for (const s of this.world.snakes) {
+    // Snakes — body segments batched into one path per snake (not per
+    // segment), head drawn separately afterward so it's always visually
+    // on top and distinguishable from the body trail.
+    for (const s of world.snakes) {
       if (!s.alive && s.id !== this.mySnakeId) continue; // don't render other players' corpses cluttering the view
+      const isMe = s.id === this.mySnakeId;
+
       ctx.globalAlpha = s.alive ? 1 : 0.35;
-      ctx.fillStyle = s.color;
-      for (const seg of s.segments) {
+
+      // Body — one path for every segment of this snake.
+      ctx.beginPath();
+      for (let i = s.segments.length - 1; i >= 1; i--) {
+        const seg = s.segments[i];
         const sx = seg.x - camX, sy = seg.y - camY;
         if (sx < -20 || sx > logW + 20 || sy < -20 || sy > logH + 20) continue;
-        ctx.beginPath();
+        ctx.moveTo(sx + 10, sy);
         ctx.arc(sx, sy, 10, 0, Math.PI * 2);
-        ctx.fill();
       }
-      // Name label above the head
-      if (s.segments[0]) {
-        const hx = s.segments[0].x - camX, hy = s.segments[0].y - camY;
+      ctx.fillStyle = s.color;
+      ctx.fill();
+
+      // Head — bigger than body segments plus a glow and simple eye, so
+      // it's immediately clear which end is the front at a glance,
+      // matching how single-player's snakes always distinguish the head.
+      const head = s.segments[0];
+      if (head) {
+        const hx = head.x - camX, hy = head.y - camY;
+        ctx.save();
+        ctx.shadowColor = s.color;
+        ctx.shadowBlur = isMe ? 22 : 14;
+        ctx.beginPath();
+        ctx.arc(hx, hy, 13, 0, Math.PI * 2);
+        ctx.fillStyle = s.color;
+        ctx.fill();
+        ctx.restore();
+
+        ctx.beginPath();
+        ctx.arc(hx, hy, 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(10,10,10,0.9)';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(hx, hy, 1.8, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+
+        // Name label above the head
         ctx.font = '600 12px Segoe UI, system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillStyle = 'rgba(255,255,255,0.85)';
-        ctx.fillText(s.id === this.mySnakeId ? 'You' : s.name, hx, hy - 22);
+        ctx.fillText(isMe ? 'You' : s.name, hx, hy - 24);
       }
       ctx.globalAlpha = 1;
+    }
+  },
+
+  // Tiled dot-grid, drawn once per frame as a single fillRect-per-row
+  // sweep rather than per-dot draw calls. Offset by the camera position
+  // (mod the grid spacing) so it reads as part of the moving world
+  // instead of a static screen-space overlay.
+  _drawBackgroundGrid(ctx, logW, logH, camX, camY) {
+    const spacing = 46;
+    const offX = -(((camX % spacing) + spacing) % spacing);
+    const offY = -(((camY % spacing) + spacing) % spacing);
+    ctx.fillStyle = 'rgba(126,255,178,0.06)';
+    for (let y = offY; y < logH + spacing; y += spacing) {
+      for (let x = offX; x < logW + spacing; x += spacing) {
+        ctx.fillRect(x, y, 1.5, 1.5);
+      }
     }
   },
 };
