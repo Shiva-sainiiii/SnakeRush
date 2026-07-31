@@ -24,6 +24,21 @@
    the same start screen.
 ═══════════════════════════════════════════════════════════════ */
 
+// Must match SEGMENT_GAP on the server (server.js) — the spacing used to
+// resample raw per-tick network points into evenly-spaced visual
+// segments (see MP._resampleSegments). If the server's value ever
+// changes, update this to match or body segment color banding will look
+// subtly uneven again.
+const SEGMENT_GAP_VISUAL = 12;
+
+// Must match WORLD_W/WORLD_H on the server — used to draw the world
+// boundary wall and the minimap. The server is authoritative for actual
+// movement clamping; these are purely for the client to know where to
+// draw the edge/map, so a mismatch wouldn't break gameplay, just make
+// the boundary visual line up wrong.
+const MP_WORLD_W = 4000;
+const MP_WORLD_H = 4000;
+
 const MP = {
   ws: null,
   roomCode: null,
@@ -509,6 +524,19 @@ const MP = {
     ctx.shadowBlur = 0;
 
     this._drawSnakes(ctx, world, camX, camY, logW, logH);
+
+    // World boundary — draws the actual edge of the 4000x4000 world as a
+    // visible wall whenever it's anywhere near the viewport, so hitting
+    // it never comes as a surprise. This directly addresses "boundary
+    // pata nahi chalti" — previously there was no indication at all that
+    // an edge existed until the snake's movement got clamped there.
+    this._drawWorldBoundary(ctx, camX, camY, logW, logH);
+
+    // Minimap — small corner overview showing the whole world, every
+    // snake's position, and the boundary, so "kaha hu me aur mera dost"
+    // is always answerable at a glance without needing to open a
+    // separate full map.
+    this._drawMinimap(ctx, world, logW, logH);
   },
 
   // Resolves a skin ID (as sent by the server, originally from another
@@ -533,6 +561,37 @@ const MP = {
     return def; // 'palette' or 'solid' — used as-is, same shape SKINS_DEF already provides
   },
 
+  // The server adds one raw point to a snake's segment array every tick
+  // (20/sec) and trims by total trail distance, not by point count — so
+  // the raw array holds noticeably more points than single-player's
+  // evenly-12px-gapped visual segments, and a fresh point at index 0
+  // every tick shifts every other point's array index by one. Coloring
+  // directly off that raw index (as an early version of this file did)
+  // made multicolour-style skins visibly "crawl" backward down the body
+  // every frame instead of staying visually locked to physical position.
+  //
+  // This resamples the raw points into fixed SEGMENT_GAP-spaced dots by
+  // walking cumulative distance from the head, the same visual result
+  // single-player's spring-follow segment model produces natively. Each
+  // resampled dot's position in the *output* list only depends on how
+  // far it is from the head along the body — not on how many raw points
+  // the network happened to deliver — so segment 5's color stays segment
+  // 5's color regardless of tick timing or connection jitter.
+  _resampleSegments(rawSegments, gap) {
+    if (rawSegments.length === 0) return [];
+    const out = [rawSegments[0]];
+    let acc = 0;
+    for (let i = 1; i < rawSegments.length; i++) {
+      const a = rawSegments[i - 1], b = rawSegments[i];
+      acc += Math.hypot(a.x - b.x, a.y - b.y);
+      if (acc >= gap) {
+        out.push(b);
+        acc = 0;
+      }
+    }
+    return out;
+  },
+
   // Snakes — body segments batched into one path per snake (not per
   // segment), head drawn separately afterward so it's always visually
   // on top and distinguishable from the body trail.
@@ -541,21 +600,23 @@ const MP = {
       if (!s.alive && s.id !== this.mySnakeId) continue; // don't render other players' corpses cluttering the view
       const isMe = s.id === this.mySnakeId;
       const skin = this._resolveSkin(s.skin);
+      const segs = this._resampleSegments(s.segments, SEGMENT_GAP_VISUAL);
 
       ctx.globalAlpha = s.alive ? 1 : 0.35;
 
       if (skin.kind === 'palette') {
-        // Palette skins cycle color by segment index — same visual
-        // approach as single-player's multicolour/crimson/toxic/royal/
-        // gilded skins. Grouped by color bucket so each color still only
-        // costs one beginPath()/fill() rather than one per segment.
+        // Palette skins cycle color by resampled-segment index — stable
+        // per physical body position now (see _resampleSegments), not
+        // the raw network-point index. Grouped by color bucket so each
+        // color still only costs one beginPath()/fill() rather than one
+        // per segment.
         const pal = skin.palette;
         for (let c = 0; c < pal.length; c++) {
           ctx.beginPath();
           let any = false;
-          for (let i = s.segments.length - 1; i >= 1; i--) {
+          for (let i = segs.length - 1; i >= 1; i--) {
             if (i % pal.length !== c) continue;
-            const seg = s.segments[i];
+            const seg = segs[i];
             const sx = seg.x - camX, sy = seg.y - camY;
             if (sx < -20 || sx > logW + 20 || sy < -20 || sy > logH + 20) continue;
             ctx.moveTo(sx + 10, sy);
@@ -568,8 +629,8 @@ const MP = {
         // Solid skins (fatty/thin/fallback) — one flat body color, same
         // single beginPath()/fill() batching as before.
         ctx.beginPath();
-        for (let i = s.segments.length - 1; i >= 1; i--) {
-          const seg = s.segments[i];
+        for (let i = segs.length - 1; i >= 1; i--) {
+          const seg = segs[i];
           const sx = seg.x - camX, sy = seg.y - camY;
           if (sx < -20 || sx > logW + 20 || sy < -20 || sy > logH + 20) continue;
           ctx.moveTo(sx + 10, sy);
@@ -633,6 +694,150 @@ const MP = {
         ctx.fillRect(x, y, 1.5, 1.5);
       }
     }
+  },
+
+  // Draws the world's actual edge as a visible wall wherever it's near
+  // the current viewport — a soft red glow gradient a couple hundred
+  // units before the true edge, then a solid line exactly at the edge.
+  // Only pays any drawing cost when an edge is actually close enough to
+  // matter (early-outs per edge otherwise), so this is free for the vast
+  // majority of a match spent away from the boundary.
+  _drawWorldBoundary(ctx, camX, camY, logW, logH) {
+    const warnDist = 260; // start showing the warning glow this far from the true edge, in world units
+
+    const edges = [
+      { side: 'left',   worldPos: 0,          near: camX < warnDist },
+      { side: 'right',  worldPos: MP_WORLD_W, near: camX + logW > MP_WORLD_W - warnDist },
+      { side: 'top',    worldPos: 0,          near: camY < warnDist },
+      { side: 'bottom', worldPos: MP_WORLD_H, near: camY + logH > MP_WORLD_H - warnDist },
+    ];
+
+    for (const edge of edges) {
+      if (!edge.near) continue;
+      ctx.save();
+      if (edge.side === 'left' || edge.side === 'right') {
+        const screenX = edge.worldPos - camX;
+        const grad = ctx.createLinearGradient(
+          screenX + (edge.side === 'left' ? warnDist : -warnDist), 0,
+          screenX, 0
+        );
+        grad.addColorStop(0, 'rgba(255,60,60,0)');
+        grad.addColorStop(1, 'rgba(255,60,60,0.28)');
+        ctx.fillStyle = grad;
+        const rectX = edge.side === 'left' ? screenX : screenX - warnDist;
+        ctx.fillRect(rectX, 0, warnDist, logH);
+        ctx.strokeStyle = 'rgba(255,80,80,0.9)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(screenX, 0);
+        ctx.lineTo(screenX, logH);
+        ctx.stroke();
+      } else {
+        const screenY = edge.worldPos - camY;
+        const grad = ctx.createLinearGradient(
+          0, screenY + (edge.side === 'top' ? warnDist : -warnDist),
+          0, screenY
+        );
+        grad.addColorStop(0, 'rgba(255,60,60,0)');
+        grad.addColorStop(1, 'rgba(255,60,60,0.28)');
+        ctx.fillStyle = grad;
+        const rectY = edge.side === 'top' ? screenY : screenY - warnDist;
+        ctx.fillRect(0, rectY, logW, warnDist);
+        ctx.strokeStyle = 'rgba(255,80,80,0.9)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(0, screenY);
+        ctx.lineTo(logW, screenY);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  },
+
+  // Shared geometry for the minimap rect — used both for drawing it and
+  // for hit-testing taps on it (see _isPointOnMinimap), same pattern as
+  // single-player's _getMinimapRect so the tappable area always exactly
+  // matches what's drawn.
+  _getMinimapRect(logW, logH) {
+    const isNarrow = logW < 480;
+    const w = isNarrow ? 100 : 140;
+    const h = isNarrow ? 100 : 140;
+    const pad = isNarrow ? 8 : 14;
+    const x = logW - w - pad;
+    const y = (isNarrow ? 95 : 70) + pad; // clear of the HUD pill row
+    return { x, y, w, h };
+  },
+
+  _isPointOnMinimap(clientX, clientY) {
+    if (!this.inMatch) return false;
+    const logW = window.innerWidth, logH = window.innerHeight;
+    const rect = this._getMinimapRect(logW, logH);
+    return clientX >= rect.x && clientX <= rect.x + rect.w &&
+           clientY >= rect.y && clientY <= rect.y + rect.h;
+  },
+
+  // Small always-visible corner minimap — shows the whole 4000x4000
+  // world, every snake's position (color-coded, AI dimmer than
+  // players), and the current viewport rectangle, directly answering
+  // "where am I / where's my friend / how close is the edge" at a
+  // glance without leaving gameplay.
+  _drawMinimap(ctx, world, logW, logH) {
+    const { x: mx, y: my, w: mw, h: mh } = this._getMinimapRect(logW, logH);
+    const scaleX = mw / MP_WORLD_W, scaleY = mh / MP_WORLD_H;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(5,10,15,0.75)';
+    ctx.strokeStyle = 'rgba(126,255,178,0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(mx, my, mw, mh, 10) : ctx.rect(mx, my, mw, mh);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(mx, my, mw, mh);
+    ctx.clip();
+
+    // Food — tiny dots, way too small individually to render per-type
+    // detail at this zoom, same simplification single-player's minimap
+    // already makes.
+    ctx.fillStyle = 'rgba(255,221,0,0.5)';
+    for (const f of world.food) {
+      ctx.fillRect(mx + f.x * scaleX - 0.5, my + f.y * scaleY - 0.5, 1, 1);
+    }
+
+    // Snakes
+    for (const s of world.snakes) {
+      if (!s.alive) continue;
+      const head = s.segments[0];
+      if (!head) continue;
+      const dotX = mx + head.x * scaleX, dotY = my + head.y * scaleY;
+      const isMe = s.id === this.mySnakeId;
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, isMe ? 4 : (s.isAI ? 2 : 3), 0, Math.PI * 2);
+      ctx.fillStyle = s.isAI ? 'rgba(255,255,255,0.35)' : s.color;
+      ctx.fill();
+      if (isMe) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    }
+
+    // Current viewport rectangle
+    const mine = world.snakes.find((s) => s.id === this.mySnakeId);
+    if (mine) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(
+        mx + this._camX * scaleX, my + this._camY * scaleY,
+        logW * scaleX, logH * scaleY
+      );
+    }
+
+    ctx.restore(); // clip
+    ctx.restore();
   },
 };
 
