@@ -166,7 +166,7 @@ const MP = {
     SafeStorage.setItem('snakeRush_mpServerUrl', this.serverUrl);
     this._showStatus('Connecting to server… this can take up to a minute if it was asleep.');
     this._connect(() => {
-      this._send({ type: 'create_room', name: getPlayerName() });
+      this._send({ type: 'create_room', name: getPlayerName(), skin: Settings.design });
     });
   },
 
@@ -180,7 +180,7 @@ const MP = {
     SafeStorage.setItem('snakeRush_mpServerUrl', this.serverUrl);
     this._showStatus('Connecting to server… this can take up to a minute if it was asleep.');
     this._connect(() => {
-      this._send({ type: 'join_room', roomCode: code, name: getPlayerName() });
+      this._send({ type: 'join_room', roomCode: code, name: getPlayerName(), skin: Settings.design });
     });
   },
 
@@ -266,11 +266,17 @@ const MP = {
         // the two using elapsed wall-clock time (see _getInterpolatedWorld).
         this._prevSnapshot = this._curSnapshot;
         this._curSnapshot = { snakes: msg.snakes, food: msg.food, t: performance.now() };
-        this._updateWaitingList(msg.snakes);
-        // Auto-start the match as soon as there are 2+ players and we're
-        // still sitting in the lobby overlay — matches the "starts
+        // AI snakes (Phase 4) are always present in msg.snakes, so both
+        // the waiting-room list and the "did a friend join yet" check
+        // must filter them out — otherwise the match would auto-start
+        // the instant a single human joins, since the AI count alone
+        // already satisfies ">= 2".
+        const humanSnakes = msg.snakes.filter((s) => !s.isAI);
+        this._updateWaitingList(humanSnakes);
+        // Auto-start the match as soon as there are 2+ human players and
+        // we're still sitting in the lobby overlay — matches the "starts
         // automatically once a friend joins" behavior shown in the UI.
-        if (!this.inMatch && msg.snakes.length >= 2) {
+        if (!this.inMatch && humanSnakes.length >= 2) {
           this._enterMatch();
         }
         if (this.inMatch) this._updateHud(msg.snakes);
@@ -502,39 +508,93 @@ const MP = {
     ctx.fill();
     ctx.shadowBlur = 0;
 
-    // Snakes — body segments batched into one path per snake (not per
-    // segment), head drawn separately afterward so it's always visually
-    // on top and distinguishable from the body trail.
+    this._drawSnakes(ctx, world, camX, camY, logW, logH);
+  },
+
+  // Resolves a skin ID (as sent by the server, originally from another
+  // player's Settings.design) into concrete colors this renderer can use.
+  // Reuses the exact same SKINS_DEF / DESIGNER_PALETTES data the single-
+  // player renderer already has loaded — no separate multiplayer skin
+  // data to keep in sync. Falls back to the default skin for any
+  // unrecognized/missing ID (e.g. an ID for a skin added in a client
+  // version this one predates) rather than crashing.
+  _resolveSkin(skinId) {
+    const def = (typeof SKINS_DEF !== 'undefined' && SKINS_DEF.find((s) => s.id === skinId)) || null;
+    if (!def) return { kind: 'solid', body: '#39ff6a', head: '#7effb2' };
+
+    if (def.kind === 'designer') {
+      // Same auto-cycling palette single-player's designer skin uses —
+      // reads the shared _designerPaletteIdx so every client viewing a
+      // designer-skinned snake sees it cycle in sync.
+      const idx = (typeof _designerPaletteIdx !== 'undefined') ? _designerPaletteIdx : 0;
+      const pal = (typeof DESIGNER_PALETTES !== 'undefined') ? DESIGNER_PALETTES[idx] : ['#39ff6a', '#7effb2'];
+      return { kind: 'palette', palette: pal, head: pal[1] || pal[0] };
+    }
+    return def; // 'palette' or 'solid' — used as-is, same shape SKINS_DEF already provides
+  },
+
+  // Snakes — body segments batched into one path per snake (not per
+  // segment), head drawn separately afterward so it's always visually
+  // on top and distinguishable from the body trail.
+  _drawSnakes(ctx, world, camX, camY, logW, logH) {
     for (const s of world.snakes) {
       if (!s.alive && s.id !== this.mySnakeId) continue; // don't render other players' corpses cluttering the view
       const isMe = s.id === this.mySnakeId;
+      const skin = this._resolveSkin(s.skin);
 
       ctx.globalAlpha = s.alive ? 1 : 0.35;
 
-      // Body — one path for every segment of this snake.
-      ctx.beginPath();
-      for (let i = s.segments.length - 1; i >= 1; i--) {
-        const seg = s.segments[i];
-        const sx = seg.x - camX, sy = seg.y - camY;
-        if (sx < -20 || sx > logW + 20 || sy < -20 || sy > logH + 20) continue;
-        ctx.moveTo(sx + 10, sy);
-        ctx.arc(sx, sy, 10, 0, Math.PI * 2);
+      if (skin.kind === 'palette') {
+        // Palette skins cycle color by segment index — same visual
+        // approach as single-player's multicolour/crimson/toxic/royal/
+        // gilded skins. Grouped by color bucket so each color still only
+        // costs one beginPath()/fill() rather than one per segment.
+        const pal = skin.palette;
+        for (let c = 0; c < pal.length; c++) {
+          ctx.beginPath();
+          let any = false;
+          for (let i = s.segments.length - 1; i >= 1; i--) {
+            if (i % pal.length !== c) continue;
+            const seg = s.segments[i];
+            const sx = seg.x - camX, sy = seg.y - camY;
+            if (sx < -20 || sx > logW + 20 || sy < -20 || sy > logH + 20) continue;
+            ctx.moveTo(sx + 10, sy);
+            ctx.arc(sx, sy, 10, 0, Math.PI * 2);
+            any = true;
+          }
+          if (any) { ctx.fillStyle = pal[c]; ctx.fill(); }
+        }
+      } else {
+        // Solid skins (fatty/thin/fallback) — one flat body color, same
+        // single beginPath()/fill() batching as before.
+        ctx.beginPath();
+        for (let i = s.segments.length - 1; i >= 1; i--) {
+          const seg = s.segments[i];
+          const sx = seg.x - camX, sy = seg.y - camY;
+          if (sx < -20 || sx > logW + 20 || sy < -20 || sy > logH + 20) continue;
+          ctx.moveTo(sx + 10, sy);
+          ctx.arc(sx, sy, 10, 0, Math.PI * 2);
+        }
+        ctx.fillStyle = skin.body;
+        ctx.fill();
       }
-      ctx.fillStyle = s.color;
-      ctx.fill();
 
       // Head — bigger than body segments plus a glow and simple eye, so
       // it's immediately clear which end is the front at a glance,
       // matching how single-player's snakes always distinguish the head.
+      // AI snakes get a slightly dimmer glow than real players so a
+      // glance at the world can tell "friend" from "wandering AI" by
+      // brightness as well as by color palette.
       const head = s.segments[0];
       if (head) {
+        const headColor = skin.head || s.color;
         const hx = head.x - camX, hy = head.y - camY;
         ctx.save();
-        ctx.shadowColor = s.color;
-        ctx.shadowBlur = isMe ? 22 : 14;
+        ctx.shadowColor = headColor;
+        ctx.shadowBlur = isMe ? 22 : (s.isAI ? 10 : 14);
         ctx.beginPath();
         ctx.arc(hx, hy, 13, 0, Math.PI * 2);
-        ctx.fillStyle = s.color;
+        ctx.fillStyle = headColor;
         ctx.fill();
         ctx.restore();
 
@@ -547,11 +607,13 @@ const MP = {
         ctx.fillStyle = '#fff';
         ctx.fill();
 
-        // Name label above the head
+        // Name label above the head — AI snakes get a 🤖 prefix so
+        // they're unambiguous even before noticing the color difference.
+        const label = isMe ? 'You' : (s.isAI ? `🤖 ${s.name}` : s.name);
         ctx.font = '600 12px Segoe UI, system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillStyle = 'rgba(255,255,255,0.85)';
-        ctx.fillText(isMe ? 'You' : s.name, hx, hy - 24);
+        ctx.fillStyle = s.isAI ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.85)';
+        ctx.fillText(label, hx, hy - 24);
       }
       ctx.globalAlpha = 1;
     }
