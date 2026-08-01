@@ -66,15 +66,17 @@ const PRED_SERVER_TICK_S = 0.05;      // 20 ticks/sec — the tick length PRED_T
 const PRED_SEGMENT_GAP = 12;          // matches SEGMENT_GAP
 const PRED_EDGE_MARGIN = 10;          // matches SEGMENT_R, used for the same edge clamp the server applies
 
-// How much of the predicted/server position gap gets closed per frame
-// once a fresh snapshot arrives. A fraction (not an instant snap) so
-// small, constant prediction drift (float rounding, tiny timing
-// differences) corrects itself smoothly instead of visibly popping.
-const RECONCILE_LERP = 0.25;
+// How fast an outstanding reconciliation offset (see _reconcileSelf)
+// bleeds toward zero, as a fraction removed per second. 8/sec means ~63%
+// of any error is gone within ~125ms and it's visually settled within a
+// couple hundred ms — fast enough to stay locked to the server, slow
+// enough that individual corrections (arriving ~every 50ms) are never
+// seen as a discrete pop, only as a continuous slide.
+const RECONCILE_DECAY_PER_SEC = 8;
 // Beyond this distance the gap is treated as a "real" desync (death,
 // respawn, a missed collision, a long stall) rather than normal drift —
-// snap instantly instead of lerping, since lerping a huge gap would just
-// look like sliding/teleporting in slow motion.
+// re-seed instantly instead of sliding, since sliding a huge gap would
+// just look like teleporting in slow motion.
 const RECONCILE_SNAP_DIST = 220;
 
 const MP = {
@@ -113,6 +115,14 @@ const MP = {
   // Local input state
   _pointer: { x: 0, y: 0 },
   _boosting: false,
+  // Virtual joystick state — mirrors single-player's game_part3.js touch
+  // joystick (drag-relative-to-origin with a dead zone and a visible
+  // thumb), which mp.js never had; it only tracked raw pointer position
+  // and steered toward it directly, with touchstart also flipping boost
+  // on immediately — meaning any touch to steer was also boosting.
+  _joystick: { active: false, originX: 0, originY: 0, thumbX: 0, thumbY: 0, maxR: 50 },
+  _joystickDir: { x: 0, y: 0 },
+  _joystickTouchId: null, // which finger owns the joystick, so a 2nd finger (boost) can't hijack it
   _dpr: 1,
   _camX: 0,
   _camY: 0,
@@ -525,6 +535,7 @@ const MP = {
     this._predictedSelf = {
       x: snake.segments[0].x,
       y: snake.segments[0].y,
+      errX: 0, errY: 0, // pending reconciliation offset, see _reconcileSelf
       dirX: 1, dirY: 0,
       inputDirX: 1, inputDirY: 0,
       boosting: false,
@@ -539,14 +550,15 @@ const MP = {
   // boost state, then rebuild the segment trail from the new head
   // position. Called once per render frame (variable dt), unlike the
   // server which runs this at a fixed 50ms tick — the two will never be
-  // pixel-identical, which is exactly what _reconcileSelf exists to fix.
+  // pixel-identical, which is exactly what errX/errY exists to fix.
+  //
+  // Also decays any pending reconciliation offset (see _reconcileSelf)
+  // by the same dt, so the correction is one continuous per-frame slide
+  // instead of a series of discrete jumps every time a snapshot arrives.
   _advancePrediction(dt) {
     const p = this._predictedSelf;
     if (!p || dt <= 0) return;
 
-    // Scale the per-tick turn-rate constant to whatever dt this frame
-    // actually is, so steering feels the same regardless of frame rate
-    // instead of turning faster on high-refresh screens.
     const turnRate = 1 - Math.pow(1 - PRED_TURN_RATE_PER_TICK, dt / PRED_SERVER_TICK_S);
     p.dirX += (p.inputDirX - p.dirX) * turnRate;
     p.dirY += (p.inputDirY - p.dirY) * turnRate;
@@ -557,7 +569,22 @@ const MP = {
     p.x = Math.min(Math.max(p.x + p.dirX * speed * dt, PRED_EDGE_MARGIN), MP_WORLD_W - PRED_EDGE_MARGIN);
     p.y = Math.min(Math.max(p.y + p.dirY * speed * dt, PRED_EDGE_MARGIN), MP_WORLD_H - PRED_EDGE_MARGIN);
 
-    p.segments.unshift({ x: p.x, y: p.y });
+    // Bleed off any outstanding reconciliation error gradually (exponential
+    // decay, framerate-independent) and fold it into the drawn head
+    // position only — never into p.x/p.y themselves. Keeping the raw
+    // simulation and the display offset separate means the *next*
+    // simulation step always continues from a clean physics state, so
+    // errors can't compound frame over frame.
+    if (p.errX || p.errY) {
+      const decay = Math.pow(1 - RECONCILE_DECAY_PER_SEC, dt);
+      p.errX *= decay;
+      p.errY *= decay;
+      if (Math.hypot(p.errX, p.errY) < 0.3) { p.errX = 0; p.errY = 0; }
+    }
+    const drawX = p.x + p.errX;
+    const drawY = p.y + p.errY;
+
+    p.segments.unshift({ x: drawX, y: drawY });
     const maxSegs = Math.max(1, Math.round(p.length));
     const desiredTrailLen = maxSegs * PRED_SEGMENT_GAP;
     let acc = 0, trimAt = p.segments.length;
@@ -569,11 +596,19 @@ const MP = {
     if (p.segments.length > trimAt) p.segments.length = trimAt;
   },
 
-  // Pulls the predicted snake toward where the server says it actually
-  // is. Small gaps (normal float/timing drift) close gradually over a
-  // few frames via RECONCILE_LERP so the correction is invisible; large
-  // gaps (death/respawn/a missed event) snap immediately since there's
-  // no "real" position to smoothly slide from.
+  // Records how far off the predicted head is from the server's
+  // authoritative head as an *offset*, rather than moving the head there
+  // directly. _advancePrediction bleeds this offset toward zero a little
+  // every frame, so the on-screen snake does one continuous smooth slide
+  // toward the correct spot instead of snapping 25% closer every time a
+  // new snapshot lands (~20x/sec) — that repeated snapping was the
+  // "flickering forward and back" and the body looking individually
+  // jittery, since each segment was being pulled toward a different old
+  // snapshot's segment independently.
+  //
+  // The body is never matched to the server's segments directly — it's
+  // always rebuilt from the head trail in _advancePrediction, so it stays
+  // one continuous curve no matter how the head offset is moving.
   _reconcileSelf(authSnake) {
     if (!authSnake.alive) {
       // Dead/respawning — nothing to predict against right now. Re-seed
@@ -588,53 +623,110 @@ const MP = {
     p.length = authSnake.length; // length itself is never predicted client-side, always trust the server
 
     const authHead = authSnake.segments[0];
+    // Compare against the *simulation* position (p.x/p.y), not the
+    // current drawn position — the drawn position already includes
+    // whatever offset is still bleeding off from the last correction, so
+    // comparing against it would double-count that same error.
     const gap = Math.hypot(authHead.x - p.x, authHead.y - p.y);
 
     if (gap > RECONCILE_SNAP_DIST) {
       this._seedPredictedSelf(authSnake);
       return;
     }
-    if (gap < 0.5) return; // close enough, avoid doing pointless tiny corrections every tick
+    if (gap < 0.5) return; // close enough, not worth a correction
 
-    p.x += (authHead.x - p.x) * RECONCILE_LERP;
-    p.y += (authHead.y - p.y) * RECONCILE_LERP;
-    // Nudge the trailing segments toward the server's shape too (same
-    // lerp fraction), so the body doesn't visibly kink at the head while
-    // the tail stays on the old predicted path.
-    const segCount = Math.min(p.segments.length, authSnake.segments.length);
-    for (let i = 0; i < segCount; i++) {
-      p.segments[i].x += (authSnake.segments[i].x - p.segments[i].x) * RECONCILE_LERP;
-      p.segments[i].y += (authSnake.segments[i].y - p.segments[i].y) * RECONCILE_LERP;
-    }
+    // Re-anchor the simulation to the server's position immediately
+    // (so future prediction steps start from a correct baseline and
+    // errors don't accumulate), but push the resulting jump entirely
+    // into errX/errY so the *drawn* position doesn't move yet — only
+    // _advancePrediction's per-frame decay moves it, smoothly.
+    p.errX += p.x - authHead.x;
+    p.errY += p.y - authHead.y;
+    p.x = authHead.x;
+    p.y = authHead.y;
   },
 
   // ── Input ────────────────────────────────────────────────────
   _setupInput() {
     const canvas = this.el.canvas;
 
+    // Desktop/mouse: unchanged pointer-follow steering — there's no
+    // touch surface to put a joystick on, so "steer toward the cursor"
+    // stays the right feel here.
     const setPointerFromEvent = (clientX, clientY) => {
       this._pointer.x = clientX;
       this._pointer.y = clientY;
     };
-
     canvas.addEventListener('mousemove', (e) => setPointerFromEvent(e.clientX, e.clientY));
     canvas.addEventListener('mousedown', () => { this._boosting = true; });
     window.addEventListener('mouseup', () => { this._boosting = false; });
 
+    // Touch: virtual joystick, matching single-player's game_part3.js —
+    // the first finger down is claimed as the joystick and steers via
+    // drag-distance-from-origin (not absolute position), with a small
+    // dead zone so tiny finger tremor near the origin doesn't cause
+    // jitter. A second finger is boost-only and never moves the
+    // joystick, so steering and boosting can be done with two hands
+    // independently instead of one touch doing both at once.
     canvas.addEventListener('touchstart', (e) => {
       if (!this.inMatch) return;
       e.preventDefault();
-      const t = e.touches[0];
-      setPointerFromEvent(t.clientX, t.clientY);
-      this._boosting = true;
+      for (const t of e.changedTouches) {
+        if (this._joystickTouchId === null && !this._joystick.active) {
+          this._joystickTouchId = t.identifier;
+          this._joystick.active = true;
+          this._joystick.originX = t.clientX;
+          this._joystick.originY = t.clientY;
+          this._joystick.thumbX = t.clientX;
+          this._joystick.thumbY = t.clientY;
+          this._joystickDir = { x: 0, y: 0 };
+        } else if (t.identifier !== this._joystickTouchId) {
+          this._boosting = true;
+        }
+      }
     }, { passive: false });
+
     canvas.addEventListener('touchmove', (e) => {
       if (!this.inMatch) return;
       e.preventDefault();
-      const t = e.touches[0];
-      setPointerFromEvent(t.clientX, t.clientY);
+      if (!this._joystick.active || this._joystickTouchId === null) return;
+      let t = null;
+      for (const ct of e.changedTouches) {
+        if (ct.identifier === this._joystickTouchId) { t = ct; break; }
+      }
+      if (!t) return;
+
+      const dx = t.clientX - this._joystick.originX;
+      const dy = t.clientY - this._joystick.originY;
+      const dist = Math.hypot(dx, dy);
+      const maxR = this._joystick.maxR;
+      const clamp = Math.min(dist, maxR);
+      const nx = dist > 0 ? dx / dist : 0;
+      const ny = dist > 0 ? dy / dist : 0;
+      this._joystick.thumbX = this._joystick.originX + nx * clamp;
+      this._joystick.thumbY = this._joystick.originY + ny * clamp;
+      if (dist > 10) this._joystickDir = { x: nx, y: ny }; // dead zone — matches single-player's
     }, { passive: false });
-    canvas.addEventListener('touchend', () => { this._boosting = false; });
+
+    canvas.addEventListener('touchend', (e) => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === this._joystickTouchId) {
+          this._joystickTouchId = null;
+          this._joystick.active = false;
+          this._joystickDir = { x: 0, y: 0 };
+        }
+      }
+      // Boost stays on only while some other (non-joystick) finger is still down
+      const otherFingersDown = e.touches.length > (this._joystick.active ? 1 : 0);
+      this._boosting = otherFingersDown;
+    }, { passive: true });
+
+    canvas.addEventListener('touchcancel', () => {
+      this._joystickTouchId = null;
+      this._joystick.active = false;
+      this._joystickDir = { x: 0, y: 0 };
+      this._boosting = false;
+    }, { passive: true });
 
     this.el.hudBoost.addEventListener('mousedown', () => { this._boosting = true; });
     this.el.hudBoost.addEventListener('mouseup', () => { this._boosting = false; });
@@ -645,17 +737,26 @@ const MP = {
   _sendInput() {
     if (!this.inMatch) return;
 
-    // Steer toward the pointer relative to the snake's own head position
-    // on screen (head is always drawn at screen-center, see _renderLoop),
-    // same "move toward where you're touching" feel as single-player.
-    const cx = this.el.canvas.width / this._dpr / 2;
-    const cy = this.el.canvas.height / this._dpr / 2;
-    const dx = this._pointer.x - cx;
-    const dy = this._pointer.y - cy;
-    const len = Math.hypot(dx, dy);
-    if (len < 5) return; // dead zone near center, avoids jitter when finger lifts near middle
-
-    const dirX = dx / len, dirY = dy / len;
+    let dirX, dirY;
+    if (this._joystick.active) {
+      // Touch device with the joystick engaged — steer by joystick
+      // direction, same as single-player.
+      if (this._joystickDir.x === 0 && this._joystickDir.y === 0) return; // inside dead zone, hold current heading
+      dirX = this._joystickDir.x;
+      dirY = this._joystickDir.y;
+    } else {
+      // Desktop/mouse fallback — steer toward the pointer relative to the
+      // snake's own head position on screen (head is always drawn at
+      // screen-center, see _renderLoop).
+      const cx = this.el.canvas.width / this._dpr / 2;
+      const cy = this.el.canvas.height / this._dpr / 2;
+      const dx = this._pointer.x - cx;
+      const dy = this._pointer.y - cy;
+      const len = Math.hypot(dx, dy);
+      if (len < 5) return; // dead zone near center, avoids jitter when cursor sits near middle
+      dirX = dx / len;
+      dirY = dy / len;
+    }
 
     // Apply to the local prediction immediately — this is the actual fix
     // for input lag. Previously this function only sent the input to the
@@ -788,6 +889,32 @@ const MP = {
     // is always answerable at a glance without needing to open a
     // separate full map.
     this._drawMinimap(ctx, world, logW, logH);
+
+    // Virtual joystick — drawn last, in plain screen space (no camera
+    // transform applied here, unlike single-player's version which draws
+    // inside a screen-shake transform), so it stays glued to the finger
+    // regardless of anything happening in the world underneath it.
+    if (this._joystick.active) this._drawJoystick(ctx);
+  },
+
+  _drawJoystick(ctx) {
+    const j = this._joystick;
+    ctx.save();
+    ctx.globalAlpha = 0.45;
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(j.originX, j.originY, j.maxR, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.beginPath();
+    ctx.arc(j.thumbX, j.thumbY, 18, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
   },
 
   // Resolves a skin ID (as sent by the server, originally from another
