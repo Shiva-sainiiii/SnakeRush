@@ -39,6 +39,16 @@ const SEGMENT_GAP_VISUAL = 12;
 const MP_WORLD_W = 4000;
 const MP_WORLD_H = 4000;
 
+// How far behind real time rendering intentionally sits. This is the
+// standard fix for network jitter in real-time multiplayer: by always
+// drawing what the world looked like ~100ms ago (not "right now"), there
+// are normally 1-2 real snapshots already buffered on either side of the
+// render target, so jitter of up to ~50ms in either direction just
+// shifts which two snapshots get blended — it doesn't force any
+// extrapolation-then-correction snap. Higher = smoother under bad
+// networks but more visually "delayed"; 100ms is a common sweet spot.
+const RENDER_DELAY_MS = 100;
+
 const MP = {
   ws: null,
   roomCode: null,
@@ -48,16 +58,18 @@ const MP = {
   connected: false,
   inMatch: false,
 
-  // Snapshot buffer for interpolation. The server broadcasts at 20
-  // ticks/sec (every 50ms), but the screen renders at 60fps — without
-  // interpolation, every snake would visibly "jump" between positions
-  // instead of gliding, which reads as lag even though the network
-  // itself is fine. We keep the two most recent snapshots and blend
-  // between them based on elapsed time, the same technique any
-  // real-time multiplayer game uses for this exact problem.
-  _prevSnapshot: null,   // { snakes, food, t } — older snapshot
-  _curSnapshot: null,    // { snakes, food, t } — newest snapshot
-  _serverTickMs: 50,     // matches TICK_MS on the server (20 ticks/sec)
+  // Snapshot history buffer for interpolation. Rather than keeping only
+  // the two most recent snapshots and racing to extrapolate right up to
+  // "now" (which is what caused the forward/backward wobble whenever
+  // network jitter made a snapshot arrive later or earlier than
+  // expected), this keeps a short rolling history and always renders
+  // slightly BEHIND real time (see RENDER_DELAY_MS below). That gives
+  // normal jitter a buffer to be absorbed into — the render is always
+  // interpolating between two snapshots that have both already safely
+  // arrived, instead of extrapolating past the newest one and hoping the
+  // next one shows up on schedule.
+  _snapshotHistory: [], // [{ snakes, food, t }, ...] oldest to newest
+  _serverTickMs: 50,     // matches TICK_MS on the server (20 ticks/sec), used only as a sane history-trim size
 
   // Local input state
   _pointer: { x: 0, y: 0 },
@@ -95,7 +107,9 @@ const MP = {
 
       hud: document.getElementById('mp-hud'),
       hudRoom: document.getElementById('mp-hud-room'),
+      hudScore: document.getElementById('mp-hud-score'),
       hudLength: document.getElementById('mp-hud-length'),
+      hudLives: document.getElementById('mp-hud-lives'),
       hudStatus: document.getElementById('mp-hud-status'),
       hudBoost: document.getElementById('mp-hud-boost'),
       exitBtn: document.getElementById('mp-exit-btn'),
@@ -275,12 +289,17 @@ const MP = {
         this._showStep('waiting');
         break;
 
-      case 'state':
-        // Shift the buffer: what was "current" becomes "previous", and
-        // this new message becomes "current". Rendering blends between
-        // the two using elapsed wall-clock time (see _getInterpolatedWorld).
-        this._prevSnapshot = this._curSnapshot;
-        this._curSnapshot = { snakes: msg.snakes, food: msg.food, t: performance.now() };
+      case 'state': {
+        // Push into the rolling history buffer, then trim anything old
+        // enough that it can no longer be relevant to the render delay
+        // (keep a little extra margin rather than trimming right at the
+        // edge, so a brief burst of network jitter never empties the
+        // buffer right when it's needed most).
+        this._snapshotHistory.push({ snakes: msg.snakes, food: msg.food, t: performance.now() });
+        const trimBefore = performance.now() - RENDER_DELAY_MS - this._serverTickMs * 4;
+        while (this._snapshotHistory.length > 2 && this._snapshotHistory[0].t < trimBefore) {
+          this._snapshotHistory.shift();
+        }
         // AI snakes (Phase 4) are always present in msg.snakes, so both
         // the waiting-room list and the "did a friend join yet" check
         // must filter them out — otherwise the match would auto-start
@@ -296,6 +315,7 @@ const MP = {
         }
         if (this.inMatch) this._updateHud(msg.snakes);
         break;
+      }
 
       case 'error':
         this._showStatus(msg.message || 'Something went wrong.', true);
@@ -336,6 +356,7 @@ const MP = {
     this._disconnect();
     this.inMatch = false;
     this.roomCode = null;
+    this._snapshotHistory = [];
     this.el.hud.classList.add('hidden');
     this.el.canvas.classList.add('hidden');
     this.el.overlay.classList.remove('hidden');
@@ -360,30 +381,73 @@ const MP = {
 
   _updateHud(snakes) {
     const mine = snakes.find((s) => s.id === this.mySnakeId);
-    if (mine) {
-      this.el.hudLength.textContent = `Length: ${mine.length}`;
-      if (!mine.alive) this._showMatchStatus('💀 You died — watching the match');
-      else this._showMatchStatus('');
+    if (!mine) return;
+
+    this.el.hudLength.textContent = `Length: ${mine.length}`;
+    this.el.hudScore.textContent = `Score: ${mine.score || 0}`;
+
+    // Lives shown as heart icons — mirrors single-player's HUD convention
+    // (♥ per remaining life) rather than a plain number, so it reads at
+    // a glance the same way single-player already trained the player to
+    // read it.
+    if (typeof mine.lives === 'number') {
+      this.el.hudLives.textContent = '❤️'.repeat(Math.max(0, mine.lives));
+      this.el.hudLives.classList.remove('hidden');
+    } else {
+      this.el.hudLives.classList.add('hidden');
+    }
+
+    if (!mine.alive) {
+      if (mine.lives > 0) {
+        this._showMatchStatus('💀 You died — respawning…');
+      } else {
+        // Out of lives — this player's run is over, but they can keep
+        // watching the match (the room itself keeps going for whoever
+        // still has lives left). Distinct message from the respawning
+        // case so it's clear nothing more is coming for them.
+        this._showMatchStatus('☠️ Out of lives — watching the rest of the match');
+      }
+    } else {
+      this._showMatchStatus('');
     }
   },
 
-  // Blends between _prevSnapshot and _curSnapshot based on how much wall-
-  // clock time has passed since _curSnapshot arrived, relative to the
-  // server's own tick interval. This is what turns 20 discrete
-  // server updates/sec into smooth 60fps motion on screen instead of
-  // visible steps every ~50ms.
+  // Finds the two buffered snapshots that straddle "renderTime" (now
+  // minus RENDER_DELAY_MS) and blends between them. Because rendering
+  // deliberately lags real time by RENDER_DELAY_MS, renderTime normally
+  // falls BETWEEN two snapshots that have already both safely arrived —
+  // there's essentially never a need to extrapolate past the newest
+  // data, which is what made the old prev/cur-only approach wobble
+  // whenever a snapshot arrived a bit later than the previous fixed-
+  // interval assumption expected.
   _getInterpolatedWorld() {
-    const cur = this._curSnapshot;
-    if (!cur) return { snakes: [], food: [] };
-    const prev = this._prevSnapshot;
-    if (!prev) return cur; // first snapshot ever — nothing to blend from yet
+    const hist = this._snapshotHistory;
+    if (hist.length === 0) return { snakes: [], food: [] };
+    if (hist.length === 1) return hist[0];
 
-    const elapsed = performance.now() - cur.t;
-    // Clamp slightly past 1.0 (not just to 1.0) so brief network hiccups
-    // don't cause a visible stall right as the next snapshot is due —
-    // the snake keeps extrapolating its last known heading a little
-    // rather than freezing dead still.
-    const t = Math.min(1.3, elapsed / this._serverTickMs);
+    const renderTime = performance.now() - RENDER_DELAY_MS;
+
+    // Find the newest snapshot at or before renderTime, and the one
+    // right after it — these are the two we blend between.
+    let prev = hist[0], cur = hist[hist.length - 1];
+    for (let i = 0; i < hist.length - 1; i++) {
+      if (hist[i].t <= renderTime && hist[i + 1].t >= renderTime) {
+        prev = hist[i];
+        cur = hist[i + 1];
+        break;
+      }
+    }
+    // If renderTime is newer than everything buffered (a rare case right
+    // after a connection hiccup catches up), just use the two newest
+    // snapshots — this naturally degrades to a short extrapolation
+    // rather than crashing or freezing.
+    if (renderTime > hist[hist.length - 1].t) {
+      prev = hist[hist.length - 2] || hist[hist.length - 1];
+      cur = hist[hist.length - 1];
+    }
+
+    const span = Math.max(1, cur.t - prev.t); // avoid divide-by-zero if two snapshots landed at the same tick
+    const t = Math.max(0, Math.min(1.3, (renderTime - prev.t) / span));
 
     const prevById = new Map(prev.snakes.map((s) => [s.id, s]));
     const snakes = cur.snakes.map((curSnake) => {
@@ -437,8 +501,9 @@ const MP = {
   },
 
   _sendInput() {
-    if (!this.inMatch || !this._curSnapshot) return;
-    const mine = this._curSnapshot.snakes.find((s) => s.id === this.mySnakeId);
+    if (!this.inMatch || this._snapshotHistory.length === 0) return;
+    const latest = this._snapshotHistory[this._snapshotHistory.length - 1];
+    const mine = latest.snakes.find((s) => s.id === this.mySnakeId);
     if (!mine || !mine.alive) return;
 
     // Steer toward the pointer relative to the snake's own head position
@@ -509,16 +574,33 @@ const MP = {
     // one per food item. This was the main render-cost issue: with ~80
     // food items each doing their own beginPath+arc+fill, that's 80
     // separate draw calls every frame just for food, before snakes are
-    // even drawn.
+    // even drawn. Lifeline food (rare, capped at 1 on the map) is drawn
+    // separately in a distinct pink so it reads as clearly special —
+    // still just one extra beginPath()/fill() pair even when present.
     ctx.shadowColor = '#ffdd00';
     ctx.shadowBlur = 8;
     ctx.fillStyle = '#ffdd00';
     ctx.beginPath();
     for (const f of world.food) {
+      if (f.isLifeline) continue;
       const sx = f.x - camX, sy = f.y - camY;
       if (sx < -20 || sx > logW + 20 || sy < -20 || sy > logH + 20) continue;
       ctx.moveTo(sx + 6, sy);
       ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+    }
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.shadowColor = '#ff5f9e';
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = '#ff5f9e';
+    ctx.beginPath();
+    for (const f of world.food) {
+      if (!f.isLifeline) continue;
+      const sx = f.x - camX, sy = f.y - camY;
+      if (sx < -20 || sx > logW + 20 || sy < -20 || sy > logH + 20) continue;
+      ctx.moveTo(sx + 9, sy);
+      ctx.arc(sx, sy, 9, 0, Math.PI * 2);
     }
     ctx.fill();
     ctx.shadowBlur = 0;
