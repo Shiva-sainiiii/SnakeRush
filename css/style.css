@@ -1883,7 +1883,7 @@ body::after {
 #mp-hud.hidden { display: none; }
 #mp-hud > * { pointer-events: auto; }
 
-#mp-hud-room, #mp-hud-length, #mp-hud-status {
+#mp-hud-room, #mp-hud-score, #mp-hud-length, #mp-hud-lives, #mp-hud-status {
   padding: 8px 14px;
   border-radius: 999px;
   background: rgba(13,19,15,0.75);
@@ -1895,6 +1895,7 @@ body::after {
   white-space: nowrap;
 }
 #mp-hud-room { color: var(--green-soft); }
+#mp-hud-lives.hidden { display: none; }
 
 #mp-hud-boost {
   padding: 8px 16px;
