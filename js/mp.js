@@ -47,7 +47,35 @@ const MP_WORLD_H = 4000;
 // shifts which two snapshots get blended — it doesn't force any
 // extrapolation-then-correction snap. Higher = smoother under bad
 // networks but more visually "delayed"; 100ms is a common sweet spot.
+// This delay is only applied to OTHER players + food now (see
+// _predictedSelf below) — applying it to the local player too was the
+// actual source of the reported input lag: every one of your own moves
+// had to round-trip to the server and back before you'd see it, on top
+// of this buffer.
 const RENDER_DELAY_MS = 100;
+
+// ── Local prediction constants — must exactly mirror server.js so the
+// predicted snake moves identically to how the server will simulate it.
+// If these ever drift out of sync with server.js, prediction error will
+// grow every tick instead of staying near-zero, and RECONCILE_LERP will
+// end up doing more visible correction work than it should.
+const PRED_BASE_SPEED = 140;          // world units/sec — matches BASE_SPEED
+const PRED_BOOST_SPEED = 260;         // world units/sec — matches BOOST_SPEED
+const PRED_TURN_RATE_PER_TICK = 0.18; // matches server's per-tick turn lerp factor
+const PRED_SERVER_TICK_S = 0.05;      // 20 ticks/sec — the tick length PRED_TURN_RATE_PER_TICK was tuned for
+const PRED_SEGMENT_GAP = 12;          // matches SEGMENT_GAP
+const PRED_EDGE_MARGIN = 10;          // matches SEGMENT_R, used for the same edge clamp the server applies
+
+// How much of the predicted/server position gap gets closed per frame
+// once a fresh snapshot arrives. A fraction (not an instant snap) so
+// small, constant prediction drift (float rounding, tiny timing
+// differences) corrects itself smoothly instead of visibly popping.
+const RECONCILE_LERP = 0.25;
+// Beyond this distance the gap is treated as a "real" desync (death,
+// respawn, a missed collision, a long stall) rather than normal drift —
+// snap instantly instead of lerping, since lerping a huge gap would just
+// look like sliding/teleporting in slow motion.
+const RECONCILE_SNAP_DIST = 220;
 
 const MP = {
   ws: null,
@@ -70,6 +98,17 @@ const MP = {
   // next one shows up on schedule.
   _snapshotHistory: [], // [{ snakes, food, t }, ...] oldest to newest
   _serverTickMs: 50,     // matches TICK_MS on the server (20 ticks/sec), used only as a sane history-trim size
+
+  // Locally-predicted state for the player's OWN snake only — moved every
+  // render frame using the same movement formula as server.js, instead of
+  // waiting for a server snapshot. This is what removes the round-trip
+  // lag from your own steering: you see yourself move the instant you
+  // steer, and the server snapshot (arriving ~tick-rate + network-RTT
+  // later) is used only to gently correct any drift, not as the primary
+  // source of your own position. Other players/food still render from
+  // the delayed/interpolated snapshot — see _getInterpolatedWorld.
+  _predictedSelf: null, // { x, y, dirX, dirY, inputDirX, inputDirY, boosting, length, segments }
+  _lastPredictTime: 0,
 
   // Local input state
   _pointer: { x: 0, y: 0 },
@@ -287,6 +326,10 @@ const MP = {
         this._hideStatus();
         this.el.roomCodeDisplay.textContent = this.roomCode;
         this._showStep('waiting');
+        // Seed prediction from the snake the server just handed back, so
+        // the very first predicted frame starts from the real spawn point
+        // instead of (0,0).
+        if (msg.snake) this._seedPredictedSelf(msg.snake);
         break;
 
       case 'state': {
@@ -314,6 +357,12 @@ const MP = {
           this._enterMatch();
         }
         if (this.inMatch) this._updateHud(msg.snakes);
+
+        // Reconcile local prediction against the authoritative snapshot —
+        // the server is always right; this just decides how gently we
+        // catch up to it. See RECONCILE_LERP / RECONCILE_SNAP_DIST.
+        const authSelf = msg.snakes.find((s) => s.id === this.mySnakeId);
+        if (authSelf) this._reconcileSelf(authSelf);
         break;
       }
 
@@ -357,6 +406,7 @@ const MP = {
     this.inMatch = false;
     this.roomCode = null;
     this._snapshotHistory = [];
+    this._predictedSelf = null;
     this.el.hud.classList.add('hidden');
     this.el.canvas.classList.add('hidden');
     this.el.overlay.classList.remove('hidden');
@@ -466,6 +516,98 @@ const MP = {
     return { snakes, food: cur.food };
   },
 
+  // ── Local prediction (own snake only) ───────────────────────
+  // Builds the initial predicted state from a server-sent snake object
+  // (used both on room join and as a hard fallback if prediction was
+  // never seeded for some reason, e.g. a respawn snapshot arriving before
+  // the next predict tick runs).
+  _seedPredictedSelf(snake) {
+    this._predictedSelf = {
+      x: snake.segments[0].x,
+      y: snake.segments[0].y,
+      dirX: 1, dirY: 0,
+      inputDirX: 1, inputDirY: 0,
+      boosting: false,
+      length: snake.length,
+      segments: snake.segments.map((s) => ({ x: s.x, y: s.y })),
+    };
+    this._lastPredictTime = performance.now();
+  },
+
+  // Advances the predicted snake by dt seconds using the exact same
+  // formula server.js runs — smooth turn-toward-input, speed based on
+  // boost state, then rebuild the segment trail from the new head
+  // position. Called once per render frame (variable dt), unlike the
+  // server which runs this at a fixed 50ms tick — the two will never be
+  // pixel-identical, which is exactly what _reconcileSelf exists to fix.
+  _advancePrediction(dt) {
+    const p = this._predictedSelf;
+    if (!p || dt <= 0) return;
+
+    // Scale the per-tick turn-rate constant to whatever dt this frame
+    // actually is, so steering feels the same regardless of frame rate
+    // instead of turning faster on high-refresh screens.
+    const turnRate = 1 - Math.pow(1 - PRED_TURN_RATE_PER_TICK, dt / PRED_SERVER_TICK_S);
+    p.dirX += (p.inputDirX - p.dirX) * turnRate;
+    p.dirY += (p.inputDirY - p.dirY) * turnRate;
+    const dl = Math.hypot(p.dirX, p.dirY) || 1;
+    p.dirX /= dl; p.dirY /= dl;
+
+    const speed = (p.boosting && p.length > 6) ? PRED_BOOST_SPEED : PRED_BASE_SPEED;
+    p.x = Math.min(Math.max(p.x + p.dirX * speed * dt, PRED_EDGE_MARGIN), MP_WORLD_W - PRED_EDGE_MARGIN);
+    p.y = Math.min(Math.max(p.y + p.dirY * speed * dt, PRED_EDGE_MARGIN), MP_WORLD_H - PRED_EDGE_MARGIN);
+
+    p.segments.unshift({ x: p.x, y: p.y });
+    const maxSegs = Math.max(1, Math.round(p.length));
+    const desiredTrailLen = maxSegs * PRED_SEGMENT_GAP;
+    let acc = 0, trimAt = p.segments.length;
+    for (let i = 1; i < p.segments.length; i++) {
+      const a = p.segments[i - 1], b = p.segments[i];
+      acc += Math.hypot(a.x - b.x, a.y - b.y);
+      if (acc >= desiredTrailLen) { trimAt = i + 1; break; }
+    }
+    if (p.segments.length > trimAt) p.segments.length = trimAt;
+  },
+
+  // Pulls the predicted snake toward where the server says it actually
+  // is. Small gaps (normal float/timing drift) close gradually over a
+  // few frames via RECONCILE_LERP so the correction is invisible; large
+  // gaps (death/respawn/a missed event) snap immediately since there's
+  // no "real" position to smoothly slide from.
+  _reconcileSelf(authSnake) {
+    if (!authSnake.alive) {
+      // Dead/respawning — nothing to predict against right now. Re-seed
+      // so the moment a fresh spawn snapshot arrives, prediction picks up
+      // cleanly from it instead of resuming from a stale pre-death spot.
+      this._seedPredictedSelf(authSnake);
+      return;
+    }
+    if (!this._predictedSelf) { this._seedPredictedSelf(authSnake); return; }
+
+    const p = this._predictedSelf;
+    p.length = authSnake.length; // length itself is never predicted client-side, always trust the server
+
+    const authHead = authSnake.segments[0];
+    const gap = Math.hypot(authHead.x - p.x, authHead.y - p.y);
+
+    if (gap > RECONCILE_SNAP_DIST) {
+      this._seedPredictedSelf(authSnake);
+      return;
+    }
+    if (gap < 0.5) return; // close enough, avoid doing pointless tiny corrections every tick
+
+    p.x += (authHead.x - p.x) * RECONCILE_LERP;
+    p.y += (authHead.y - p.y) * RECONCILE_LERP;
+    // Nudge the trailing segments toward the server's shape too (same
+    // lerp fraction), so the body doesn't visibly kink at the head while
+    // the tail stays on the old predicted path.
+    const segCount = Math.min(p.segments.length, authSnake.segments.length);
+    for (let i = 0; i < segCount; i++) {
+      p.segments[i].x += (authSnake.segments[i].x - p.segments[i].x) * RECONCILE_LERP;
+      p.segments[i].y += (authSnake.segments[i].y - p.segments[i].y) * RECONCILE_LERP;
+    }
+  },
+
   // ── Input ────────────────────────────────────────────────────
   _setupInput() {
     const canvas = this.el.canvas;
@@ -501,10 +643,7 @@ const MP = {
   },
 
   _sendInput() {
-    if (!this.inMatch || this._snapshotHistory.length === 0) return;
-    const latest = this._snapshotHistory[this._snapshotHistory.length - 1];
-    const mine = latest.snakes.find((s) => s.id === this.mySnakeId);
-    if (!mine || !mine.alive) return;
+    if (!this.inMatch) return;
 
     // Steer toward the pointer relative to the snake's own head position
     // on screen (head is always drawn at screen-center, see _renderLoop),
@@ -516,7 +655,19 @@ const MP = {
     const len = Math.hypot(dx, dy);
     if (len < 5) return; // dead zone near center, avoids jitter when finger lifts near middle
 
-    this._send({ type: 'input', dirX: dx / len, dirY: dy / len, boosting: this._boosting });
+    const dirX = dx / len, dirY = dy / len;
+
+    // Apply to the local prediction immediately — this is the actual fix
+    // for input lag. Previously this function only sent the input to the
+    // server and waited for it to come back in a snapshot; now the
+    // player's own snake starts turning the same frame they steer.
+    if (this._predictedSelf) {
+      this._predictedSelf.inputDirX = dirX;
+      this._predictedSelf.inputDirY = dirY;
+      this._predictedSelf.boosting = this._boosting;
+    }
+
+    this._send({ type: 'input', dirX, dirY, boosting: this._boosting });
     this.el.hudBoost.classList.toggle('hud-boost-active', this._boosting);
   },
 
@@ -547,12 +698,30 @@ const MP = {
     const logW = this.el.canvas.width / dpr;
     const logH = this.el.canvas.height / dpr;
 
-    // Interpolated snapshot — this is the single fix that removes most
-    // of the perceived "lag": without it, positions only update every
-    // ~50ms (the server's tick rate) and every snake visibly steps
-    // between spots instead of gliding, even though the network itself
-    // is working fine.
+    // Interpolated snapshot — this smooths OTHER players + food, which
+    // still only update every ~50ms (the server's tick rate) and would
+    // otherwise visibly step between spots instead of gliding.
     const world = this._getInterpolatedWorld();
+
+    // Advance and splice in the locally-predicted snake for the player's
+    // own position — this is what actually removes input lag. Without
+    // this, "world" above is the only source of your own position too,
+    // which means every one of your moves waits a full network round-trip
+    // plus RENDER_DELAY_MS before you'd see it.
+    const now = performance.now();
+    const dt = Math.min(0.1, (now - (this._lastPredictTime || now)) / 1000); // clamp so a tab-switch stall can't produce one giant leap
+    this._lastPredictTime = now;
+    if (this._predictedSelf) {
+      this._advancePrediction(dt);
+      const idx = world.snakes.findIndex((s) => s.id === this.mySnakeId);
+      const predictedAsSnake = {
+        ...(idx >= 0 ? world.snakes[idx] : {}),
+        id: this.mySnakeId,
+        segments: this._predictedSelf.segments,
+      };
+      if (idx >= 0) world.snakes[idx] = predictedAsSnake;
+      else world.snakes.push(predictedAsSnake);
+    }
 
     ctx.fillStyle = '#060907';
     ctx.fillRect(0, 0, logW, logH);
