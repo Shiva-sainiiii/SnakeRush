@@ -596,7 +596,16 @@ const MP = {
     // simulation step always continues from a clean physics state, so
     // errors can't compound frame over frame.
     if (p.errX || p.errY) {
-      const decay = Math.pow(1 - RECONCILE_DECAY_PER_SEC, dt);
+      // Exponential decay: e^(-rate * dt). The previous version used
+      // Math.pow(1 - RECONCILE_DECAY_PER_SEC, dt), which is broken —
+      // RECONCILE_DECAY_PER_SEC is 8, so the base (1 - 8 = -7) is
+      // negative, and a negative base raised to a fractional exponent
+      // (dt is ~0.016 at 60fps) is NaN in JS. That NaN then flowed into
+      // drawX/drawY every frame, and canvas arc()/fill() calls silently
+      // no-op on NaN coordinates instead of throwing — which is exactly
+      // why nothing rendered (snake, and anything drawn after it) with
+      // no console error to point at it.
+      const decay = Math.exp(-RECONCILE_DECAY_PER_SEC * dt);
       p.errX *= decay;
       p.errY *= decay;
       if (Math.hypot(p.errX, p.errY) < 0.3) { p.errX = 0; p.errY = 0; }
