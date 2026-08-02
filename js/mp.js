@@ -36,6 +36,20 @@ const SEGMENT_GAP_VISUAL = 12;
 // movement clamping; these are purely for the client to know where to
 // draw the edge/map, so a mismatch wouldn't break gameplay, just make
 // the boundary visual line up wrong.
+// The following must match server.js exactly — client-side prediction
+// (see _tickPrediction) runs the same movement formula locally every
+// frame so the player's own snake responds instantly to input instead
+// of waiting for a server round-trip. Any mismatch here doesn't break
+// anything (the server stays authoritative and reconciliation corrects
+// drift), it just means the predicted position drifts from the real one
+// more often, causing more visible correction snaps.
+const MP_BASE_SPEED = 140;
+const MP_BOOST_SPEED = 260;
+const MP_SEGMENT_R = 10;
+const MP_START_LEN = 8;
+const MP_TURN_RATE_PER_TICK = 0.18; // server's per-50ms-tick turn lerp factor
+const MP_TICK_MS = 50;              // server's fixed tick duration, used to scale the turn-rate for prediction's variable frame dt
+
 const MP_WORLD_W = 4000;
 const MP_WORLD_H = 4000;
 
@@ -47,42 +61,7 @@ const MP_WORLD_H = 4000;
 // shifts which two snapshots get blended — it doesn't force any
 // extrapolation-then-correction snap. Higher = smoother under bad
 // networks but more visually "delayed"; 100ms is a common sweet spot.
-// This delay is only applied to OTHER players + food now (see
-// _predictedSelf below) — applying it to the local player too was the
-// actual source of the reported input lag: every one of your own moves
-// had to round-trip to the server and back before you'd see it, on top
-// of this buffer.
 const RENDER_DELAY_MS = 100;
-
-// ── Local prediction constants — must exactly mirror server.js (which
-// itself mirrors single-player's game_part1.js/game_part2.js on purpose)
-// so the predicted snake moves identically to how the server will
-// simulate it, and multiplayer steering feels indistinguishable from
-// single-player. If server.js or single-player's tuning ever changes,
-// these need updating too, or prediction error will grow every tick
-// instead of staying near-zero.
-const PRED_BASE_SPEED = 190;          // world units/sec — matches single-player BASE_SPEED
-const PRED_BOOST_SPEED = 300;         // matches single-player BOOST_SPEED
-const PRED_SEGMENT_GAP = 8;           // matches single-player SEGMENT_GAP
-const PRED_EDGE_MARGIN = 10;          // matches SEGMENT_R, used for the same edge clamp the server applies
-// Length-based speed scaling — matches single-player's Snake._calcSpeed.
-const PRED_SPEED_SMALL_MUL = 1.13;
-const PRED_SPEED_LARGE_MUL = 0.87;
-const PRED_SPEED_SCALE_MIN = 10;
-const PRED_SPEED_SCALE_MAX = 80;
-
-// How fast an outstanding reconciliation offset (see _reconcileSelf)
-// bleeds toward zero, as a fraction removed per second. 8/sec means ~63%
-// of any error is gone within ~125ms and it's visually settled within a
-// couple hundred ms — fast enough to stay locked to the server, slow
-// enough that individual corrections (arriving ~every 50ms) are never
-// seen as a discrete pop, only as a continuous slide.
-const RECONCILE_DECAY_PER_SEC = 8;
-// Beyond this distance the gap is treated as a "real" desync (death,
-// respawn, a missed collision, a long stall) rather than normal drift —
-// re-seed instantly instead of sliding, since sliding a huge gap would
-// just look like teleporting in slow motion.
-const RECONCILE_SNAP_DIST = 220;
 
 const MP = {
   ws: null,
@@ -106,31 +85,30 @@ const MP = {
   _snapshotHistory: [], // [{ snakes, food, t }, ...] oldest to newest
   _serverTickMs: 50,     // matches TICK_MS on the server (20 ticks/sec), used only as a sane history-trim size
 
-  // Locally-predicted state for the player's OWN snake only — moved every
-  // render frame using the same movement formula as server.js, instead of
-  // waiting for a server snapshot. This is what removes the round-trip
-  // lag from your own steering: you see yourself move the instant you
-  // steer, and the server snapshot (arriving ~tick-rate + network-RTT
-  // later) is used only to gently correct any drift, not as the primary
-  // source of your own position. Other players/food still render from
-  // the delayed/interpolated snapshot — see _getInterpolatedWorld.
-  _predictedSelf: null, // { x, y, dirX, dirY, inputDirX, inputDirY, boosting, length, segments }
-  _lastPredictTime: 0,
-
   // Local input state
-  _pointer: { x: 0, y: 0 },
   _boosting: false,
-  // Virtual joystick state — mirrors single-player's game_part3.js touch
-  // joystick (drag-relative-to-origin with a dead zone and a visible
-  // thumb), which mp.js never had; it only tracked raw pointer position
-  // and steered toward it directly, with touchstart also flipping boost
-  // on immediately — meaning any touch to steer was also boosting.
-  _joystick: { active: false, originX: 0, originY: 0, thumbX: 0, thumbY: 0, maxR: 50 },
-  _joystickDir: { x: 0, y: 0 },
-  _joystickTouchId: null, // which finger owns the joystick, so a 2nd finger (boost) can't hijack it
   _dpr: 1,
   _camX: 0,
   _camY: 0,
+  // Touch-anchored joystick — spawns wherever the first finger touches
+  // down (not a fixed on-screen position), same interaction model as
+  // single-player's joystick. Previously this file just followed the
+  // raw finger/pointer position directly, which feels fine with a mouse
+  // but reads as unresponsive/wrong on a phone since there's no visible
+  // anchor or thumb to drag relative to.
+  _joystick: { active: false, originX: 0, originY: 0, thumbX: 0, thumbY: 0, maxR: 50 },
+  _joystickTouchId: null,
+  _joystickDir: { x: 0, y: 0 },
+
+  // Client-side prediction for the player's OWN snake only (see
+  // _tickPrediction/_reconcilePrediction). Everyone else still renders
+  // from the network-interpolated/delayed snapshot buffer — only the
+  // local player needs instant response, since only the local player is
+  // the one whose own input round-trip time would otherwise be felt as
+  // lag. This is the standard client-server netcode split (predict
+  // yourself, interpolate everyone else).
+  _predictedSelf: null,   // { x, y, dirX, dirY, length, segments } or null before the first server snapshot
+  _lastPredictionTime: 0,
 
   // ── DOM refs, populated on init ──
   el: {},
@@ -341,10 +319,6 @@ const MP = {
         this._hideStatus();
         this.el.roomCodeDisplay.textContent = this.roomCode;
         this._showStep('waiting');
-        // Seed prediction from the snake the server just handed back, so
-        // the very first predicted frame starts from the real spawn point
-        // instead of (0,0).
-        if (msg.snake) this._seedPredictedSelf(msg.snake);
         break;
 
       case 'state': {
@@ -371,13 +345,14 @@ const MP = {
         if (!this.inMatch && humanSnakes.length >= 2) {
           this._enterMatch();
         }
-        if (this.inMatch) this._updateHud(msg.snakes);
-
-        // Reconcile local prediction against the authoritative snapshot —
-        // the server is always right; this just decides how gently we
-        // catch up to it. See RECONCILE_LERP / RECONCILE_SNAP_DIST.
-        const authSelf = msg.snakes.find((s) => s.id === this.mySnakeId);
-        if (authSelf) this._reconcileSelf(authSelf);
+        if (this.inMatch) {
+          this._updateHud(msg.snakes);
+          // Reconcile our own predicted position against the fresh
+          // server truth — see _reconcilePrediction for why this is a
+          // gentle correction rather than an instant snap.
+          const myServerSnake = msg.snakes.find((s) => s.id === this.mySnakeId);
+          this._reconcilePrediction(myServerSnake);
+        }
         break;
       }
 
@@ -422,6 +397,7 @@ const MP = {
     this.roomCode = null;
     this._snapshotHistory = [];
     this._predictedSelf = null;
+    this._lastFrameTime = 0;
     this.el.hud.classList.add('hidden');
     this.el.canvas.classList.add('hidden');
     this.el.overlay.classList.remove('hidden');
@@ -531,163 +507,29 @@ const MP = {
     return { snakes, food: cur.food };
   },
 
-  // ── Local prediction (own snake only) ───────────────────────
-  // Builds the initial predicted state from a server-sent snake object
-  // (used both on room join and as a hard fallback if prediction was
-  // never seeded for some reason, e.g. a respawn snapshot arriving before
-  // the next predict tick runs).
-  // Length-based speed scaling — matches single-player's
-  // Snake._calcSpeed and server.js's _calcSpeed exactly, so a predicted
-  // snake of a given length moves at the same speed the server will
-  // simulate it at.
-  _calcPredSpeed(baseSpeed, length) {
-    const t = Math.max(0, Math.min(1, (length - PRED_SPEED_SCALE_MIN) / (PRED_SPEED_SCALE_MAX - PRED_SPEED_SCALE_MIN)));
-    const mul = PRED_SPEED_SMALL_MUL + (PRED_SPEED_LARGE_MUL - PRED_SPEED_SMALL_MUL) * t;
-    return baseSpeed * mul;
-  },
-
-  _seedPredictedSelf(snake) {
-    this._predictedSelf = {
-      x: snake.segments[0].x,
-      y: snake.segments[0].y,
-      errX: 0, errY: 0, // pending reconciliation offset, see _reconcileSelf
-      dirX: 1, dirY: 0,
-      inputDirX: 1, inputDirY: 0,
-      boosting: false,
-      length: snake.length,
-      segments: snake.segments.map((s) => ({ x: s.x, y: s.y })),
-    };
-    this._lastPredictTime = performance.now();
-  },
-
-  // Advances the predicted snake by dt seconds using the exact same
-  // formula server.js runs — smooth turn-toward-input, speed based on
-  // boost state, then rebuild the segment trail from the new head
-  // position. Called once per render frame (variable dt), unlike the
-  // server which runs this at a fixed 50ms tick — the two will never be
-  // pixel-identical, which is exactly what errX/errY exists to fix.
-  //
-  // Also decays any pending reconciliation offset (see _reconcileSelf)
-  // by the same dt, so the correction is one continuous per-frame slide
-  // instead of a series of discrete jumps every time a snapshot arrives.
-  _advancePrediction(dt) {
-    const p = this._predictedSelf;
-    if (!p || dt <= 0) return;
-
-    // Same lerp-toward-input formula single-player's PlayerSnake.update()
-    // uses — 0.12 * dt * 60, kept unsimplified so it's easy to eyeball
-    // against single-player's source and server.js's copy of it.
-    const turnRate = Math.min(1, 0.12 * dt * 60);
-    p.dirX += (p.inputDirX - p.dirX) * turnRate;
-    p.dirY += (p.inputDirY - p.dirY) * turnRate;
-    const dl = Math.hypot(p.dirX, p.dirY) || 1;
-    p.dirX /= dl; p.dirY /= dl;
-
-    const speed = p.boosting && p.length > 6
-      ? this._calcPredSpeed(PRED_BOOST_SPEED, p.length)
-      : this._calcPredSpeed(PRED_BASE_SPEED, p.length);
-    p.x = Math.min(Math.max(p.x + p.dirX * speed * dt, PRED_EDGE_MARGIN), MP_WORLD_W - PRED_EDGE_MARGIN);
-    p.y = Math.min(Math.max(p.y + p.dirY * speed * dt, PRED_EDGE_MARGIN), MP_WORLD_H - PRED_EDGE_MARGIN);
-
-    // Bleed off any outstanding reconciliation error gradually (exponential
-    // decay, framerate-independent) and fold it into the drawn head
-    // position only — never into p.x/p.y themselves. Keeping the raw
-    // simulation and the display offset separate means the *next*
-    // simulation step always continues from a clean physics state, so
-    // errors can't compound frame over frame.
-    if (p.errX || p.errY) {
-      const decay = Math.pow(1 - RECONCILE_DECAY_PER_SEC, dt);
-      p.errX *= decay;
-      p.errY *= decay;
-      if (Math.hypot(p.errX, p.errY) < 0.3) { p.errX = 0; p.errY = 0; }
-    }
-    const drawX = p.x + p.errX;
-    const drawY = p.y + p.errY;
-
-    p.segments.unshift({ x: drawX, y: drawY });
-    const maxSegs = Math.max(1, Math.round(p.length));
-    const desiredTrailLen = maxSegs * PRED_SEGMENT_GAP;
-    let acc = 0, trimAt = p.segments.length;
-    for (let i = 1; i < p.segments.length; i++) {
-      const a = p.segments[i - 1], b = p.segments[i];
-      acc += Math.hypot(a.x - b.x, a.y - b.y);
-      if (acc >= desiredTrailLen) { trimAt = i + 1; break; }
-    }
-    if (p.segments.length > trimAt) p.segments.length = trimAt;
-  },
-
-  // Records how far off the predicted head is from the server's
-  // authoritative head as an *offset*, rather than moving the head there
-  // directly. _advancePrediction bleeds this offset toward zero a little
-  // every frame, so the on-screen snake does one continuous smooth slide
-  // toward the correct spot instead of snapping 25% closer every time a
-  // new snapshot lands (~20x/sec) — that repeated snapping was the
-  // "flickering forward and back" and the body looking individually
-  // jittery, since each segment was being pulled toward a different old
-  // snapshot's segment independently.
-  //
-  // The body is never matched to the server's segments directly — it's
-  // always rebuilt from the head trail in _advancePrediction, so it stays
-  // one continuous curve no matter how the head offset is moving.
-  _reconcileSelf(authSnake) {
-    if (!authSnake.alive) {
-      // Dead/respawning — nothing to predict against right now. Re-seed
-      // so the moment a fresh spawn snapshot arrives, prediction picks up
-      // cleanly from it instead of resuming from a stale pre-death spot.
-      this._seedPredictedSelf(authSnake);
-      return;
-    }
-    if (!this._predictedSelf) { this._seedPredictedSelf(authSnake); return; }
-
-    const p = this._predictedSelf;
-    p.length = authSnake.length; // length itself is never predicted client-side, always trust the server
-
-    const authHead = authSnake.segments[0];
-    // Compare against the *simulation* position (p.x/p.y), not the
-    // current drawn position — the drawn position already includes
-    // whatever offset is still bleeding off from the last correction, so
-    // comparing against it would double-count that same error.
-    const gap = Math.hypot(authHead.x - p.x, authHead.y - p.y);
-
-    if (gap > RECONCILE_SNAP_DIST) {
-      this._seedPredictedSelf(authSnake);
-      return;
-    }
-    if (gap < 0.5) return; // close enough, not worth a correction
-
-    // Re-anchor the simulation to the server's position immediately
-    // (so future prediction steps start from a correct baseline and
-    // errors don't accumulate), but push the resulting jump entirely
-    // into errX/errY so the *drawn* position doesn't move yet — only
-    // _advancePrediction's per-frame decay moves it, smoothly.
-    p.errX += p.x - authHead.x;
-    p.errY += p.y - authHead.y;
-    p.x = authHead.x;
-    p.y = authHead.y;
-  },
-
   // ── Input ────────────────────────────────────────────────────
   _setupInput() {
     const canvas = this.el.canvas;
 
-    // Desktop/mouse: unchanged pointer-follow steering — there's no
-    // touch surface to put a joystick on, so "steer toward the cursor"
-    // stays the right feel here.
-    const setPointerFromEvent = (clientX, clientY) => {
-      this._pointer.x = clientX;
-      this._pointer.y = clientY;
-    };
-    canvas.addEventListener('mousemove', (e) => setPointerFromEvent(e.clientX, e.clientY));
+    // Desktop mouse — steering follows the cursor relative to screen
+    // center (head is always drawn at screen-center), click-and-hold to
+    // boost. Kept separate from the touch/joystick path below since a
+    // mouse has no concept of "anchor point to drag from".
+    canvas.addEventListener('mousemove', (e) => {
+      const cx = this.el.canvas.width / this._dpr / 2;
+      const cy = this.el.canvas.height / this._dpr / 2;
+      const dx = e.clientX - cx, dy = e.clientY - cy;
+      const len = Math.hypot(dx, dy);
+      if (len > 5) { this._joystickDir = { x: dx / len, y: dy / len }; this._joystick.active = true; }
+    });
     canvas.addEventListener('mousedown', () => { this._boosting = true; });
     window.addEventListener('mouseup', () => { this._boosting = false; });
 
-    // Touch: virtual joystick, matching single-player's game_part3.js —
-    // the first finger down is claimed as the joystick and steers via
-    // drag-distance-from-origin (not absolute position), with a small
-    // dead zone so tiny finger tremor near the origin doesn't cause
-    // jitter. A second finger is boost-only and never moves the
-    // joystick, so steering and boosting can be done with two hands
-    // independently instead of one touch doing both at once.
+    // Touch — a real anchored joystick, not a raw finger-follow. The
+    // joystick spawns wherever the first finger actually touches down
+    // (single-player's exact model), and only that finger's movement
+    // relative to that origin steers — a second finger anywhere else on
+    // screen triggers boost, matching single-player's convention too.
     canvas.addEventListener('touchstart', (e) => {
       if (!this.inMatch) return;
       e.preventDefault();
@@ -699,7 +541,6 @@ const MP = {
           this._joystick.originY = t.clientY;
           this._joystick.thumbX = t.clientX;
           this._joystick.thumbY = t.clientY;
-          this._joystickDir = { x: 0, y: 0 };
         } else if (t.identifier !== this._joystickTouchId) {
           this._boosting = true;
         }
@@ -707,9 +548,8 @@ const MP = {
     }, { passive: false });
 
     canvas.addEventListener('touchmove', (e) => {
-      if (!this.inMatch) return;
+      if (!this.inMatch || !this._joystick.active || this._joystickTouchId === null) return;
       e.preventDefault();
-      if (!this._joystick.active || this._joystickTouchId === null) return;
       let t = null;
       for (const ct of e.changedTouches) {
         if (ct.identifier === this._joystickTouchId) { t = ct; break; }
@@ -718,14 +558,14 @@ const MP = {
 
       const dx = t.clientX - this._joystick.originX;
       const dy = t.clientY - this._joystick.originY;
-      const dist = Math.hypot(dx, dy);
+      const dist = Math.sqrt(dx * dx + dy * dy);
       const maxR = this._joystick.maxR;
       const clamp = Math.min(dist, maxR);
       const nx = dist > 0 ? dx / dist : 0;
       const ny = dist > 0 ? dy / dist : 0;
       this._joystick.thumbX = this._joystick.originX + nx * clamp;
       this._joystick.thumbY = this._joystick.originY + ny * clamp;
-      if (dist > 10) this._joystickDir = { x: nx, y: ny }; // dead zone — matches single-player's
+      if (dist > 10) this._joystickDir = { x: nx, y: ny };
     }, { passive: false });
 
     canvas.addEventListener('touchend', (e) => {
@@ -733,10 +573,8 @@ const MP = {
         if (t.identifier === this._joystickTouchId) {
           this._joystickTouchId = null;
           this._joystick.active = false;
-          this._joystickDir = { x: 0, y: 0 };
         }
       }
-      // Boost stays on only while some other (non-joystick) finger is still down
       const otherFingersDown = e.touches.length > (this._joystick.active ? 1 : 0);
       this._boosting = otherFingersDown;
     }, { passive: true });
@@ -744,7 +582,6 @@ const MP = {
     canvas.addEventListener('touchcancel', () => {
       this._joystickTouchId = null;
       this._joystick.active = false;
-      this._joystickDir = { x: 0, y: 0 };
       this._boosting = false;
     }, { passive: true });
 
@@ -756,40 +593,101 @@ const MP = {
 
   _sendInput() {
     if (!this.inMatch) return;
+    const dir = this._joystickDir;
+    if (Math.hypot(dir.x, dir.y) < 0.01) return; // no direction yet, nothing meaningful to send
 
-    let dirX, dirY;
-    if (this._joystick.active) {
-      // Touch device with the joystick engaged — steer by joystick
-      // direction, same as single-player.
-      if (this._joystickDir.x === 0 && this._joystickDir.y === 0) return; // inside dead zone, hold current heading
-      dirX = this._joystickDir.x;
-      dirY = this._joystickDir.y;
-    } else {
-      // Desktop/mouse fallback — steer toward the pointer relative to the
-      // snake's own head position on screen (head is always drawn at
-      // screen-center, see _renderLoop).
-      const cx = this.el.canvas.width / this._dpr / 2;
-      const cy = this.el.canvas.height / this._dpr / 2;
-      const dx = this._pointer.x - cx;
-      const dy = this._pointer.y - cy;
-      const len = Math.hypot(dx, dy);
-      if (len < 5) return; // dead zone near center, avoids jitter when cursor sits near middle
-      dirX = dx / len;
-      dirY = dy / len;
-    }
-
-    // Apply to the local prediction immediately — this is the actual fix
-    // for input lag. Previously this function only sent the input to the
-    // server and waited for it to come back in a snapshot; now the
-    // player's own snake starts turning the same frame they steer.
-    if (this._predictedSelf) {
-      this._predictedSelf.inputDirX = dirX;
-      this._predictedSelf.inputDirY = dirY;
-      this._predictedSelf.boosting = this._boosting;
-    }
-
-    this._send({ type: 'input', dirX, dirY, boosting: this._boosting });
+    this._send({ type: 'input', dirX: dir.x, dirY: dir.y, boosting: this._boosting });
     this.el.hudBoost.classList.toggle('hud-boost-active', this._boosting);
+  },
+
+  // Steps the local prediction forward by `dt` seconds using the exact
+  // same movement formula as the server (see MP_* constants above). Run
+  // every render frame (not just every 50ms network tick), so the
+  // player's own snake turns and moves the instant they touch the
+  // joystick, regardless of round-trip time to the server.
+  //
+  // The turn-rate math needs care: the server applies a FIXED 0.18 lerp
+  // factor once per fixed 50ms tick, which is really a continuous decay
+  // rate of roughly -ln(1-0.18)/0.05 ≈ 3.97 per second. Applying the raw
+  // 0.18 directly per variable-length render frame would make turning
+  // speed depend on framerate (faster turns at higher fps) instead of
+  // matching the server's real-world turn speed — this converts it to
+  // the equivalent continuous rate so it turns at the same real-world
+  // speed regardless of the device's frame rate.
+  _tickPrediction(dt) {
+    const p = this._predictedSelf;
+    if (!p || p.alive === false) return;
+
+    const continuousTurnRate = -Math.log(1 - MP_TURN_RATE_PER_TICK) / (MP_TICK_MS / 1000);
+    const turnAmount = 1 - Math.exp(-continuousTurnRate * dt);
+    p.dirX += (this._joystickDir.x - p.dirX) * turnAmount;
+    p.dirY += (this._joystickDir.y - p.dirY) * turnAmount;
+    const dl = Math.hypot(p.dirX, p.dirY) || 1;
+    p.dirX /= dl; p.dirY /= dl;
+
+    const speed = (this._boosting && p.length > 6) ? MP_BOOST_SPEED : MP_BASE_SPEED;
+    p.x = Math.max(MP_SEGMENT_R, Math.min(MP_WORLD_W - MP_SEGMENT_R, p.x + p.dirX * speed * dt));
+    p.y = Math.max(MP_SEGMENT_R, Math.min(MP_WORLD_H - MP_SEGMENT_R, p.y + p.dirY * speed * dt));
+
+    p.segments.unshift({ x: p.x, y: p.y });
+    const maxSegs = Math.max(MP_START_LEN, Math.round(p.length));
+    const desiredTrailLen = maxSegs * SEGMENT_GAP_VISUAL;
+    let acc = 0, trimAt = p.segments.length;
+    for (let i = 1; i < p.segments.length; i++) {
+      const a = p.segments[i - 1], b = p.segments[i];
+      acc += Math.hypot(a.x - b.x, a.y - b.y);
+      if (acc >= desiredTrailLen) { trimAt = i + 1; break; }
+    }
+    if (p.segments.length > trimAt) p.segments.length = trimAt;
+  },
+
+  // Called whenever a fresh server snapshot arrives for our own snake.
+  // Rather than snapping the predicted position instantly to the
+  // server's authoritative one (which would undo the whole point of
+  // predicting — you'd see your own snake jump every 50ms), this either
+  // adopts the server position outright (first snapshot, or a death/
+  // respawn where a hard reset is correct) or nudges gently toward it
+  // when prediction and server have drifted apart by more than a small
+  // tolerance (e.g. after a collision the client couldn't have known
+  // about locally). Small, normal amounts of drift are simply left
+  // alone and allowed to converge naturally as prediction keeps running,
+  // since a constant tiny correction every tick would itself look like
+  // jitter.
+  _reconcilePrediction(serverSnake) {
+    if (!serverSnake) return;
+
+    if (!this._predictedSelf || !serverSnake.alive) {
+      // First snapshot ever, or we just died/respawned server-side —
+      // hard-adopt the server's state, no gentle blending, since there's
+      // either nothing to blend from yet or the discontinuity (death →
+      // respawn at a new location) is supposed to be instant anyway.
+      this._predictedSelf = {
+        x: serverSnake.x, y: serverSnake.y,
+        dirX: serverSnake.dirX, dirY: serverSnake.dirY,
+        length: serverSnake.length,
+        alive: serverSnake.alive,
+        segments: serverSnake.segments.map((s) => ({ ...s })),
+      };
+      return;
+    }
+
+    const p = this._predictedSelf;
+    p.alive = serverSnake.alive;
+    const drift = Math.hypot(p.x - serverSnake.x, p.y - serverSnake.y);
+    // A little drift is normal and expected (the server snapshot the
+    // reconciliation is checking against is itself ~1 network round-trip
+    // old by the time it arrives) — only correct when it's large enough
+    // that it would otherwise be visibly wrong, e.g. the server rejected
+    // a move near a wall, or a collision changed things unpredictably.
+    if (drift > 60) {
+      p.x = serverSnake.x; p.y = serverSnake.y;
+      p.segments = serverSnake.segments.map((s) => ({ ...s }));
+    }
+    // Length always adopts the server's value directly — length changes
+    // (eating, growing) are discrete events the client can't predict
+    // ahead of the server confirming them anyway, so there's nothing to
+    // preserve by blending here.
+    p.length = serverSnake.length;
   },
 
   // ── Rendering ────────────────────────────────────────────────
@@ -809,9 +707,18 @@ const MP = {
     canvas.style.height = h + 'px';
   },
 
-  _renderLoop() {
-    this._rafId = requestAnimationFrame(() => this._renderLoop());
+  _renderLoop(timestamp) {
+    this._rafId = requestAnimationFrame((t) => this._renderLoop(t));
     if (!this.inMatch) return;
+
+    // Real per-frame delta time, used to step client-side prediction at
+    // whatever the device's actual frame rate is (not a fixed assumption)
+    // — a dropped frame or a slow device still predicts the correct
+    // real-world distance travelled, it just does it in fewer, larger
+    // steps.
+    const dt = this._lastFrameTime ? Math.min(0.1, (timestamp - this._lastFrameTime) / 1000) : 0;
+    this._lastFrameTime = timestamp;
+    this._tickPrediction(dt);
 
     const ctx = this.ctx;
     const dpr = this._dpr;
@@ -819,25 +726,18 @@ const MP = {
     const logW = this.el.canvas.width / dpr;
     const logH = this.el.canvas.height / dpr;
 
-    // Interpolated snapshot — this smooths OTHER players + food, which
-    // still only update every ~50ms (the server's tick rate) and would
-    // otherwise visibly step between spots instead of gliding.
+    // Interpolated snapshot for everyone EXCEPT our own snake — this is
+    // what removes visible stepping for other players/AI (20 network
+    // updates/sec smoothed to 60fps). Our own snake is swapped in from
+    // _predictedSelf right after, since it needs to feel instant rather
+    // than sitting RENDER_DELAY_MS behind real time like everyone else.
     const world = this._getInterpolatedWorld();
-
-    // Advance and splice in the locally-predicted snake for the player's
-    // own position — this is what actually removes input lag. Without
-    // this, "world" above is the only source of your own position too,
-    // which means every one of your moves waits a full network round-trip
-    // plus RENDER_DELAY_MS before you'd see it.
-    const now = performance.now();
-    const dt = Math.min(0.1, (now - (this._lastPredictTime || now)) / 1000); // clamp so a tab-switch stall can't produce one giant leap
-    this._lastPredictTime = now;
     if (this._predictedSelf) {
-      this._advancePrediction(dt);
       const idx = world.snakes.findIndex((s) => s.id === this.mySnakeId);
       const predictedAsSnake = {
-        ...(idx >= 0 ? world.snakes[idx] : {}),
-        id: this.mySnakeId,
+        ...(idx >= 0 ? world.snakes[idx] : { id: this.mySnakeId, name: 'You', color: '#39ff6a', isAI: false, alive: true }),
+        x: this._predictedSelf.x, y: this._predictedSelf.y,
+        length: this._predictedSelf.length,
         segments: this._predictedSelf.segments,
       };
       if (idx >= 0) world.snakes[idx] = predictedAsSnake;
@@ -848,9 +748,9 @@ const MP = {
     ctx.fillRect(0, 0, logW, logH);
 
     const mine = world.snakes.find((s) => s.id === this.mySnakeId);
-    // Camera centers on the player's own snake; if dead, keep the camera
-    // frozen at their last known head position so the death moment is
-    // still watchable rather than snapping to (0,0).
+    // Camera centers on the player's own (predicted, instant) snake; if
+    // dead, keep the camera frozen at their last known head position so
+    // the death moment is still watchable rather than snapping to (0,0).
     if (mine && mine.segments[0]) { this._camX = mine.segments[0].x - logW / 2; this._camY = mine.segments[0].y - logH / 2; }
     const camX = this._camX, camY = this._camY;
 
@@ -910,10 +810,10 @@ const MP = {
     // separate full map.
     this._drawMinimap(ctx, world, logW, logH);
 
-    // Virtual joystick — drawn last, in plain screen space (no camera
-    // transform applied here, unlike single-player's version which draws
-    // inside a screen-shake transform), so it stays glued to the finger
-    // regardless of anything happening in the world underneath it.
+    // Joystick visual — outer ring at the touch origin, thumb dot
+    // dragged relative to it. Same visual language as single-player's
+    // joystick (see game_part4.js _drawJoystick) so the two modes feel
+    // consistent.
     if (this._joystick.active) this._drawJoystick(ctx);
   },
 
