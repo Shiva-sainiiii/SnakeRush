@@ -61,15 +61,14 @@ const RENDER_DELAY_MS = 100;
 // single-player. If server.js or single-player's tuning ever changes,
 // these need updating too, or prediction error will grow every tick
 // instead of staying near-zero.
+//
+// Speed here is constant, not length-scaled — this is "static mode":
+// length is fixed at spawn length for the whole match (food is
+// score-only, see the 'state' handler), matching server.js.
 const PRED_BASE_SPEED = 190;          // world units/sec — matches single-player BASE_SPEED
 const PRED_BOOST_SPEED = 300;         // matches single-player BOOST_SPEED
 const PRED_SEGMENT_GAP = 8;           // matches single-player SEGMENT_GAP
 const PRED_EDGE_MARGIN = 10;          // matches SEGMENT_R, used for the same edge clamp the server applies
-// Length-based speed scaling — matches single-player's Snake._calcSpeed.
-const PRED_SPEED_SMALL_MUL = 1.13;
-const PRED_SPEED_LARGE_MUL = 0.87;
-const PRED_SPEED_SCALE_MIN = 10;
-const PRED_SPEED_SCALE_MAX = 80;
 
 // How fast an outstanding reconciliation offset (see _reconcileSelf)
 // bleeds toward zero, as a fraction removed per second. 8/sec means ~63%
@@ -162,7 +161,6 @@ const MP = {
       hud: document.getElementById('mp-hud'),
       hudRoom: document.getElementById('mp-hud-room'),
       hudScore: document.getElementById('mp-hud-score'),
-      hudLength: document.getElementById('mp-hud-length'),
       hudLives: document.getElementById('mp-hud-lives'),
       hudStatus: document.getElementById('mp-hud-status'),
       hudBoost: document.getElementById('mp-hud-boost'),
@@ -448,7 +446,6 @@ const MP = {
     const mine = snakes.find((s) => s.id === this.mySnakeId);
     if (!mine) return;
 
-    this.el.hudLength.textContent = `Length: ${mine.length}`;
     this.el.hudScore.textContent = `Score: ${mine.score || 0}`;
 
     // Lives shown as heart icons — mirrors single-player's HUD convention
@@ -536,16 +533,6 @@ const MP = {
   // (used both on room join and as a hard fallback if prediction was
   // never seeded for some reason, e.g. a respawn snapshot arriving before
   // the next predict tick runs).
-  // Length-based speed scaling — matches single-player's
-  // Snake._calcSpeed and server.js's _calcSpeed exactly, so a predicted
-  // snake of a given length moves at the same speed the server will
-  // simulate it at.
-  _calcPredSpeed(baseSpeed, length) {
-    const t = Math.max(0, Math.min(1, (length - PRED_SPEED_SCALE_MIN) / (PRED_SPEED_SCALE_MAX - PRED_SPEED_SCALE_MIN)));
-    const mul = PRED_SPEED_SMALL_MUL + (PRED_SPEED_LARGE_MUL - PRED_SPEED_SMALL_MUL) * t;
-    return baseSpeed * mul;
-  },
-
   _seedPredictedSelf(snake) {
     this._predictedSelf = {
       x: snake.segments[0].x,
@@ -583,9 +570,10 @@ const MP = {
     const dl = Math.hypot(p.dirX, p.dirY) || 1;
     p.dirX /= dl; p.dirY /= dl;
 
-    const speed = p.boosting && p.length > 6
-      ? this._calcPredSpeed(PRED_BOOST_SPEED, p.length)
-      : this._calcPredSpeed(PRED_BASE_SPEED, p.length);
+    // Static mode: constant speed, no length-scaling, and boost has no
+    // length gate — length never changes (food is score-only), so both
+    // simplifications match server.js exactly.
+    const speed = p.boosting ? PRED_BOOST_SPEED : PRED_BASE_SPEED;
     p.x = Math.min(Math.max(p.x + p.dirX * speed * dt, PRED_EDGE_MARGIN), MP_WORLD_W - PRED_EDGE_MARGIN);
     p.y = Math.min(Math.max(p.y + p.dirY * speed * dt, PRED_EDGE_MARGIN), MP_WORLD_H - PRED_EDGE_MARGIN);
 
