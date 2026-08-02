@@ -412,7 +412,7 @@ const MP = {
     this.el.canvas.classList.remove('hidden');
     this.el.hudRoom.textContent = `Room: ${this.roomCode}`;
     this._resizeCanvas();
-    if (!this._rafId) this._rafId = requestAnimationFrame(() => this._renderLoop());
+    if (!this._rafId) this._rafId = requestAnimationFrame((t) => this._renderLoop(t));
     if (!this._inputTimer) this._inputTimer = setInterval(() => this._sendInput(), 50); // 20/sec, matches server tick rate
   },
 
@@ -711,6 +711,31 @@ const MP = {
     this._rafId = requestAnimationFrame((t) => this._renderLoop(t));
     if (!this.inMatch) return;
 
+    try {
+      this._renderFrame(timestamp);
+    } catch (err) {
+      // A silent exception here previously meant "canvas stays black
+      // forever, no visible error, HUD/minimap keep working since they
+      // run from separate code paths" — extremely hard to diagnose from
+      // a phone with no DevTools attached. Now it draws a visible
+      // message so this class of bug is immediately obvious instead of
+      // looking like unexplained lag.
+      console.error('[MP] render error:', err);
+      const ctx = this.ctx;
+      if (ctx) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = '#060907';
+        ctx.fillRect(0, 0, this.el.canvas.width, this.el.canvas.height);
+        ctx.fillStyle = '#ff5f9e';
+        ctx.font = '14px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText('Render error — please leave and rejoin:', 16, 30);
+        ctx.fillText(String(err && err.message || err), 16, 50);
+      }
+    }
+  },
+
+  _renderFrame(timestamp) {
     // Real per-frame delta time, used to step client-side prediction at
     // whatever the device's actual frame rate is (not a fixed assumption)
     // — a dropped frame or a slow device still predicts the correct
@@ -733,15 +758,24 @@ const MP = {
     // than sitting RENDER_DELAY_MS behind real time like everyone else.
     const world = this._getInterpolatedWorld();
     if (this._predictedSelf) {
-      const idx = world.snakes.findIndex((s) => s.id === this.mySnakeId);
+      // IMPORTANT: world.snakes may be the exact same array object that's
+      // still sitting inside _snapshotHistory (this happens whenever
+      // _getInterpolatedWorld() takes its early-return paths, e.g. only
+      // one snapshot buffered yet). Mutating it in place would corrupt
+      // history that future frames still need to interpolate from — so
+      // this always works on a fresh copy of the array, never the
+      // original.
+      const snakesCopy = world.snakes.slice();
+      const idx = snakesCopy.findIndex((s) => s.id === this.mySnakeId);
       const predictedAsSnake = {
-        ...(idx >= 0 ? world.snakes[idx] : { id: this.mySnakeId, name: 'You', color: '#39ff6a', isAI: false, alive: true }),
+        ...(idx >= 0 ? snakesCopy[idx] : { id: this.mySnakeId, name: 'You', color: '#39ff6a', isAI: false, alive: true }),
         x: this._predictedSelf.x, y: this._predictedSelf.y,
         length: this._predictedSelf.length,
         segments: this._predictedSelf.segments,
       };
-      if (idx >= 0) world.snakes[idx] = predictedAsSnake;
-      else world.snakes.push(predictedAsSnake);
+      if (idx >= 0) snakesCopy[idx] = predictedAsSnake;
+      else snakesCopy.push(predictedAsSnake);
+      world.snakes = snakesCopy;
     }
 
     ctx.fillStyle = '#060907';
