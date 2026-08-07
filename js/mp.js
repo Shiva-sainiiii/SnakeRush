@@ -1,23 +1,28 @@
 /* ═══════════════════════════════════════════════════════════════
-   MULTIPLAYER CLIENT (Phase 2 networking + Phase 3 render polish)
+   MULTIPLAYER CLIENT (WebRTC edition — see net.js / sim.js)
 
    Fully independent of the single-player Game class in game_part1-5.js.
    This file owns:
-     - The WebSocket connection to the Phase-1 server (server.js)
      - The lobby UI (#mp-overlay: create/join/waiting-room screens)
      - The in-match renderer (#mp-canvas) and HUD (#mp-hud)
-     - Touch/mouse steering input, sent to the server every frame
+     - Touch/mouse steering input
 
-   Phase 3 additions: client-side interpolation between server snapshots
-   (the server only broadcasts at 20 ticks/sec, so without this every
-   snake visibly steps instead of gliding — see _getInterpolatedWorld),
-   and batched rendering (one beginPath()/fill() per snake/food group
-   instead of one per segment/item, which was the other real cost behind
-   the reported lag).
+   No backend server — whoever creates the room ("host") runs the
+   authoritative simulation (sim.js) locally and connects to every guest
+   directly over WebRTC (net.js), which wraps PeerJS. A host's own input
+   goes straight into its local `this.sim` (see _sendInput); a guest
+   sends input over the data channel to the host instead, and both
+   receive the resulting state snapshot through the same
+   _handleMessage('state') path either way — host and guest render
+   identically because they're consuming the same shape of payload, just
+   from a different origin (a local callback vs. a network message).
 
-   Visuals are still intentionally simpler than single-player (no AI,
-   power-ups, or skins) because the server doesn't simulate those yet
-   either — that's Phase 4, once this pass proves out smoothly.
+   Client-side interpolation between snapshots (the host only broadcasts
+   at 20 ticks/sec, so without this every snake visibly steps instead of
+   gliding — see _getInterpolatedWorld) and local prediction/
+   reconciliation for the player's own snake (see _advancePrediction /
+   _reconcileSelf) are unchanged from the WebSocket version — neither
+   cares where the snapshot came from.
 
    This never touches `Settings`, `window._game`, or any single-player
    state. The two modes are only connected by both being reachable from
@@ -84,11 +89,10 @@ const RECONCILE_DECAY_PER_SEC = 8;
 const RECONCILE_SNAP_DIST = 220;
 
 const MP = {
-  ws: null,
+  sim: null, // the local Simulation instance, set only when we're the host — see sim.js
   roomCode: null,
   playerId: null,
   mySnakeId: null,
-  serverUrl: '',
   connected: false,
   inMatch: false,
 
@@ -145,7 +149,6 @@ const MP = {
       stepChoose: document.getElementById('mp-step-choose'),
       createBtn: document.getElementById('mp-create-btn'),
       joinBtn: document.getElementById('mp-join-btn'),
-      serverInput: document.getElementById('mp-server-url'),
 
       stepJoin: document.getElementById('mp-step-join'),
       codeInput: document.getElementById('mp-code-input'),
@@ -172,11 +175,6 @@ const MP = {
     if (!this.el.openBtn || !this.el.canvas) return; // markup missing, bail safely
     this.ctx = this.el.canvas.getContext('2d');
 
-    // Default server URL — pre-filled so most players never need to
-    // touch it, but editable for anyone self-hosting a different server.
-    this.serverUrl = SafeStorage.getItem('snakeRush_mpServerUrl') || 'wss://snakerushserver.onrender.com';
-    this.el.serverInput.value = this.serverUrl;
-
     this._wireUI();
   },
 
@@ -202,11 +200,6 @@ const MP = {
     el.copyCodeBtn.addEventListener('click', () => this._copyRoomCode());
     el.leaveBtn.addEventListener('click', () => this._leaveRoom());
     el.exitBtn.addEventListener('click', () => this._leaveRoom());
-
-    el.serverInput.addEventListener('change', () => {
-      this.serverUrl = el.serverInput.value.trim();
-      SafeStorage.setItem('snakeRush_mpServerUrl', this.serverUrl);
-    });
 
     this._setupInput();
     this._setupResize();
@@ -243,11 +236,46 @@ const MP = {
   },
 
   _createRoom() {
-    this.serverUrl = this.el.serverInput.value.trim() || this.serverUrl;
-    SafeStorage.setItem('snakeRush_mpServerUrl', this.serverUrl);
-    this._showStatus('Connecting to server… this can take up to a minute if it was asleep.');
-    this._connect(() => {
-      this._send({ type: 'create_room', name: getPlayerName(), skin: Settings.design });
+    this._showStatus('Setting up room…');
+
+    // Host owns the authoritative simulation now — see sim.js. It runs
+    // right here on this device instead of on a Render server; Net.host()
+    // just handles letting other browsers find and connect to this one.
+    this.sim = new window.Simulation();
+    this.mySnakeId = 'host';
+    const snake = this.sim.addPlayer('host', getPlayerName(), Settings.design);
+    this.sim.onState = (payload) => {
+      // The host is both the simulation owner AND a player in it, so it
+      // feeds the exact same state payload through the exact same
+      // _handleMessage('state') path a guest's network message would —
+      // there's no separate "host rendering" code path, which is what
+      // keeps host and guest visually identical.
+      this._handleMessage(payload);
+      Net.send(payload); // broadcast to every connected guest
+    };
+    this.sim.start();
+
+    const code = Net.host();
+    this.roomCode = code;
+    this.playerId = 'host';
+    this._hideStatus();
+    this.el.roomCodeDisplay.textContent = this.roomCode;
+    this._showStep('waiting');
+    this._seedPredictedSelf(snake);
+
+    Net.onLifecycle('peerJoined', (peerId) => {
+      const guestSnake = this.sim.addPlayer(peerId, 'Player', 'multicolour');
+      // Tell the newly-connected guest who they are before the next
+      // regular state broadcast — otherwise they'd have no way to know
+      // which of the (possibly several) snakes in the first snapshot is
+      // theirs.
+      Net.send({ type: 'joined', roomCode: this.roomCode, playerId: peerId, snake: guestSnake }, peerId);
+    });
+    Net.onLifecycle('peerLeft', (peerId) => {
+      this.sim.removePlayer(peerId);
+    });
+    Net.on('input', (msg, fromPeerId) => {
+      this.sim.setInput(fromPeerId, Number(msg.dirX) || 0, Number(msg.dirY) || 0, !!msg.boosting);
     });
   },
 
@@ -257,77 +285,45 @@ const MP = {
       this._showStatus('Enter the full room code your friend shared.', true);
       return;
     }
-    this.serverUrl = this.el.serverInput.value.trim() || this.serverUrl;
-    SafeStorage.setItem('snakeRush_mpServerUrl', this.serverUrl);
-    this._showStatus('Connecting to server… this can take up to a minute if it was asleep.');
-    this._connect(() => {
-      this._send({ type: 'join_room', roomCode: code, name: getPlayerName(), skin: Settings.design });
-    });
-  },
+    this._showStatus('Connecting to your friend…');
 
-  _connect(onOpen) {
-    this._disconnect(); // ensure no stale socket lingers
+    Net.on('joined', (msg) => this._handleMessage(msg));
+    Net.on('state', (msg) => this._handleMessage(msg));
 
-    let url = this.serverUrl;
-    if (!/^wss?:\/\//.test(url)) url = 'wss://' + url.replace(/^https?:\/\//, '');
-    url = url.replace(/\/$/, '');
-
-    let ws;
-    try {
-      ws = new WebSocket(url);
-    } catch (err) {
-      this._showStatus('Invalid server address.', true);
-      return;
-    }
-    this.ws = ws;
-
-    // Render.com free tier can take 30-60s to wake from sleep — this
-    // timeout turns an otherwise-silent long wait into a clear message
-    // instead of the lobby looking frozen/broken.
-    const wakeTimer = setTimeout(() => {
-      if (!this.connected) {
-        this._showStatus('Still waking up the server (free hosting sleeps when idle) — hang tight…');
-      }
-    }, 6000);
-
-    ws.addEventListener('open', () => {
-      clearTimeout(wakeTimer);
-      this.connected = true;
-      onOpen();
+    Net.join(code, {
+      onConnected: () => {
+        this.connected = true;
+        Net.send({ type: 'join_room', name: getPlayerName(), skin: Settings.design });
+      },
+      onFailed: (message) => {
+        this._showStatus(message, true);
+      },
     });
 
-    ws.addEventListener('message', (evt) => {
-      let msg;
-      try { msg = JSON.parse(evt.data); } catch { return; }
-      this._handleMessage(msg);
-    });
-
-    ws.addEventListener('close', () => {
-      clearTimeout(wakeTimer);
+    Net.onLifecycle('hostDisconnected', () => {
       this.connected = false;
       if (this.inMatch) {
-        this._showMatchStatus('Disconnected from server.');
+        this._showMatchStatus('Host disconnected — the match has ended.');
       }
-    });
-
-    ws.addEventListener('error', () => {
-      clearTimeout(wakeTimer);
-      this._showStatus("Couldn't reach the server. Check the URL in Server Settings.", true);
     });
   },
 
   _disconnect() {
-    if (this.ws) {
-      try { this.ws.close(); } catch (_) {}
-      this.ws = null;
+    if (this.sim) {
+      this.sim.stop();
+      this.sim = null;
     }
+    Net.teardown();
     this.connected = false;
   },
 
   _send(obj) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(obj));
-    }
+    // From a guest this always means "send to the host" (their only
+    // connection). The host itself never calls this for its own input —
+    // see _sendInput, which calls this.sim.setInput() directly instead,
+    // since host and simulation are the same device and don't need a
+    // network round-trip.
+    Net.send(obj);
   },
 
   _handleMessage(msg) {
@@ -806,7 +802,15 @@ const MP = {
       this._predictedSelf.boosting = this._boosting;
     }
 
-    this._send({ type: 'input', dirX, dirY, boosting: this._boosting });
+    if (this.sim) {
+      // We're the host — feed input straight into the local simulation
+      // instead of round-tripping it over the network to ourselves. This
+      // doesn't change what the input DOES (setInput's normalization is
+      // identical either way), only how it gets there.
+      this.sim.setInput('host', dirX, dirY, this._boosting);
+    } else {
+      this._send({ type: 'input', dirX, dirY, boosting: this._boosting });
+    }
     this.el.hudBoost.classList.toggle('hud-boost-active', this._boosting);
   },
 
@@ -1121,11 +1125,31 @@ const MP = {
   _drawWorldBoundary(ctx, camX, camY, logW, logH) {
     const warnDist = 260; // start showing the warning glow this far from the true edge, in world units
 
+    const leftNear = camX < warnDist;
+    const rightNear = camX + logW > MP_WORLD_W - warnDist;
+    const topNear = camY < warnDist;
+    const bottomNear = camY + logH > MP_WORLD_H - warnDist;
+
+    // How far each edge's strip is clipped in from the perpendicular
+    // screen edges, when the corner on that end is also "near". Without
+    // this, being in a corner (e.g. top-left) draws the left edge's
+    // vertical strip the FULL screen height and the top edge's
+    // horizontal strip the FULL screen width — together forming a
+    // full-screen "+" that cuts across the whole view. Real-world
+    // corners look like an L, not a plus: the left wall should only
+    // extend down to where the top wall begins, and vice versa. Clipping
+    // each strip to stop at warnDist past the other near edge produces
+    // exactly that L shape instead.
+    const topClip = topNear ? warnDist - camY : 0;
+    const bottomClip = bottomNear ? warnDist - (MP_WORLD_H - (camY + logH)) : 0;
+    const leftClip = leftNear ? warnDist - camX : 0;
+    const rightClip = rightNear ? warnDist - (MP_WORLD_W - (camX + logW)) : 0;
+
     const edges = [
-      { side: 'left',   worldPos: 0,          near: camX < warnDist },
-      { side: 'right',  worldPos: MP_WORLD_W, near: camX + logW > MP_WORLD_W - warnDist },
-      { side: 'top',    worldPos: 0,          near: camY < warnDist },
-      { side: 'bottom', worldPos: MP_WORLD_H, near: camY + logH > MP_WORLD_H - warnDist },
+      { side: 'left',   worldPos: 0,          near: leftNear },
+      { side: 'right',  worldPos: MP_WORLD_W, near: rightNear },
+      { side: 'top',    worldPos: 0,          near: topNear },
+      { side: 'bottom', worldPos: MP_WORLD_H, near: bottomNear },
     ];
 
     for (const edge of edges) {
@@ -1133,6 +1157,15 @@ const MP = {
       ctx.save();
       if (edge.side === 'left' || edge.side === 'right') {
         const screenX = edge.worldPos - camX;
+        // Clip the vertical strip's top/bottom to stop at the nearby
+        // corner's L-bend instead of running the full screen height.
+        const y0 = Math.max(0, topClip);
+        const y1 = logH - Math.max(0, bottomClip);
+        if (y1 <= y0) { ctx.restore(); continue; } // fully clipped away (extreme corner case), nothing to draw
+        ctx.beginPath();
+        ctx.rect(0, y0, logW, y1 - y0);
+        ctx.clip();
+
         const grad = ctx.createLinearGradient(
           screenX + (edge.side === 'left' ? warnDist : -warnDist), 0,
           screenX, 0
@@ -1141,15 +1174,23 @@ const MP = {
         grad.addColorStop(1, 'rgba(255,60,60,0.28)');
         ctx.fillStyle = grad;
         const rectX = edge.side === 'left' ? screenX : screenX - warnDist;
-        ctx.fillRect(rectX, 0, warnDist, logH);
+        ctx.fillRect(rectX, y0, warnDist, y1 - y0);
         ctx.strokeStyle = 'rgba(255,80,80,0.9)';
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.moveTo(screenX, 0);
-        ctx.lineTo(screenX, logH);
+        ctx.moveTo(screenX, y0);
+        ctx.lineTo(screenX, y1);
         ctx.stroke();
       } else {
         const screenY = edge.worldPos - camY;
+        // Same L-bend clipping, on the perpendicular (horizontal) axis.
+        const x0 = Math.max(0, leftClip);
+        const x1 = logW - Math.max(0, rightClip);
+        if (x1 <= x0) { ctx.restore(); continue; }
+        ctx.beginPath();
+        ctx.rect(x0, 0, x1 - x0, logH);
+        ctx.clip();
+
         const grad = ctx.createLinearGradient(
           0, screenY + (edge.side === 'top' ? warnDist : -warnDist),
           0, screenY
@@ -1158,12 +1199,12 @@ const MP = {
         grad.addColorStop(1, 'rgba(255,60,60,0.28)');
         ctx.fillStyle = grad;
         const rectY = edge.side === 'top' ? screenY : screenY - warnDist;
-        ctx.fillRect(0, rectY, logW, warnDist);
+        ctx.fillRect(x0, rectY, x1 - x0, warnDist);
         ctx.strokeStyle = 'rgba(255,80,80,0.9)';
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.moveTo(0, screenY);
-        ctx.lineTo(logW, screenY);
+        ctx.moveTo(x0, screenY);
+        ctx.lineTo(x1, screenY);
         ctx.stroke();
       }
       ctx.restore();
