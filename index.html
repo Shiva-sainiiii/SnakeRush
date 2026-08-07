@@ -386,12 +386,6 @@
             <span class="mp-action-sub">Enter a friend's room code</span>
           </span>
         </button>
-
-        <details id="mp-server-details" class="mp-server-details">
-          <summary>Server settings</summary>
-          <label class="mp-server-label" for="mp-server-url">Server URL</label>
-          <input id="mp-server-url" class="mp-server-input" type="text" spellcheck="false" autocapitalize="off" />
-        </details>
       </div>
 
       <!-- Step 2a: join — code entry -->
@@ -451,13 +445,25 @@
   <script src="js/game_part4.js"></script>
   <script src="js/game_part5.js"></script>
 
+  <!-- PeerJS — thin wrapper around WebRTC. Its free public broker is used
+       only for the initial handshake between two browsers; actual game
+       state travels peer-to-peer afterward, never through a backend. -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
+  <!-- The authoritative game simulation (movement, AI, collisions, food)
+       — runs on whichever device is hosting the room. See sim.js. -->
+  <script src="js/sim.js"></script>
+  <!-- WebRTC connection layer (via PeerJS) + room-code handling. -->
+  <script src="js/net.js"></script>
+
   <!-- Multiplayer client — fully independent of the single-player Game
-       class above. Owns its own canvas (#mp-canvas), its own HUD
-       (#mp-hud), and its own WebSocket connection to the Phase-1
-       server. Loaded after the single-player files so it can reuse a
-       couple of small utilities (Vector2, getPlayerName) that already
-       exist there, but it never reads or writes single-player game
-       state. -->
+       class above. Owns its own canvas (#mp-canvas) and its own HUD
+       (#mp-hud). Connects via WebRTC (net.js) instead of a backend
+       server — the room host runs sim.js locally and broadcasts state to
+       every connected guest directly over the data channel. Loaded after
+       the single-player files so it can reuse a couple of small
+       utilities (Vector2, getPlayerName) that already exist there, but
+       it never reads or writes single-player game state. -->
   <script src="js/mp.js"></script>
 
   <!-- Settings modal open/close — gear icon on hero opens it as a
