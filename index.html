@@ -347,6 +347,7 @@
   <div id="mp-hud" class="hidden">
     <span id="mp-hud-room">Room: -----</span>
     <span id="mp-hud-score">Score: 0</span>
+    <span id="mp-hud-length">Length: 8</span>
     <span id="mp-hud-lives">❤️❤️❤️</span>
     <span id="mp-hud-status"></span>
     <button id="mp-hud-boost" class="hud-boost-off">⚡ Hold to boost</button>
@@ -513,14 +514,26 @@
       }
 
       let rafId = null;
+      // Dual-mode: either single-player (window._game) or multiplayer
+      // (window.MP) may be the one actually running when the minimap is
+      // tapped — whichever it is, call that mode's _drawFullMap. Both
+      // draw onto the same #fullmap-canvas and rebuild the same
+      // #fullmap-list, so nothing else here needs to know which mode is
+      // active.
       const redrawLoop = () => {
         if (overlay.classList.contains('hidden')) { rafId = null; return; }
-        if (window._game && window._game._drawFullMap) window._game._drawFullMap();
+        if (window._game && window._game.running && window._game._drawFullMap) {
+          window._game._drawFullMap();
+        } else if (window.MP && window.MP.inMatch && window.MP._drawFullMap) {
+          window.MP._drawFullMap();
+        }
         rafId = requestAnimationFrame(redrawLoop);
       };
 
       window._openFullMap = () => {
-        if (!window._game || !window._game.running) return;
+        const spRunning = window._game && window._game.running;
+        const mpRunning = window.MP && window.MP.inMatch;
+        if (!spRunning && !mpRunning) return;
         if (listWrap) listWrap.classList.add('collapsed');
         overlay.classList.remove('hidden');
         if (rafId === null) rafId = requestAnimationFrame(redrawLoop);
