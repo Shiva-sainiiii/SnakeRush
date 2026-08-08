@@ -140,6 +140,15 @@ const SIM_AI_STATE = {
 
 const SIM_AI_COUNT = 4;
 const SIM_AI_RESPAWN_DELAY = 4;
+// How many ticks between AI avoid/seek/flee/pursue re-evaluations (1 =
+// every tick). The steering FSM re-runs its full sense+decide pass only
+// every Nth tick — wander/pursue/flee targets don't need reconsidering
+// 20x/sec, and the turn-lerp in the movement step smooths between
+// re-evaluations, so this only affects how quickly AI notices and reacts
+// to a new threat/food/target, not how smooth its movement looks. Cuts
+// the AI steering scan's CPU cost (the single biggest cost in _tick) by
+// roughly two-thirds.
+const SIM_AI_STEER_EVERY_N_TICKS = 3;
 // Titan Serpent boss timer — matches single-player's BOSS_INTERVAL_MIN/MAX
 // and rollBossInterval(): first boss arrives 70-110s into the match, then
 // again every 70-110s after the previous one dies, capped at one alive
