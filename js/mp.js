@@ -59,21 +59,32 @@ const MP_WORLD_H = 4000;
 // of this buffer.
 const RENDER_DELAY_MS = 100;
 
-// ── Local prediction constants — must exactly mirror server.js (which
+// ── Local prediction constants — must exactly mirror sim.js (which
 // itself mirrors single-player's game_part1.js/game_part2.js on purpose)
-// so the predicted snake moves identically to how the server will
-// simulate it, and multiplayer steering feels indistinguishable from
-// single-player. If server.js or single-player's tuning ever changes,
+// so the predicted snake moves identically to how the host's simulation
+// will simulate it, and multiplayer steering feels indistinguishable
+// from single-player. If sim.js or single-player's tuning ever changes,
 // these need updating too, or prediction error will grow every tick
 // instead of staying near-zero.
 //
-// Speed here is constant, not length-scaled — this is "static mode":
-// length is fixed at spawn length for the whole match (food is
-// score-only, see the 'state' handler), matching server.js.
+// Full-feature mode: length grows from food and speed scales with
+// length, matching single-player's Snake._calcSpeed and sim.js exactly.
 const PRED_BASE_SPEED = 190;          // world units/sec — matches single-player BASE_SPEED
 const PRED_BOOST_SPEED = 300;         // matches single-player BOOST_SPEED
 const PRED_SEGMENT_GAP = 8;           // matches single-player SEGMENT_GAP
 const PRED_EDGE_MARGIN = 10;          // matches SEGMENT_R, used for the same edge clamp the server applies
+// Base body radius before species radiusMul is applied — matches
+// sim.js's SIM_SEGMENT_R. Used only for full-map rendering (_drawFullMap);
+// the main in-match renderer already gets its per-snake body width from
+// a separate skin-drawing path that isn't part of this file's scope.
+const SIM_SEGMENT_R_APPROX = 10;
+// Length-based speed scaling — matches single-player's
+// SPEED_SMALL_MUL/SPEED_LARGE_MUL/SPEED_SCALE_MIN/SPEED_SCALE_MAX and
+// sim.js's copy of them exactly.
+const PRED_SPEED_SMALL_MUL = 1.13;
+const PRED_SPEED_LARGE_MUL = 0.87;
+const PRED_SPEED_SCALE_MIN = 10;
+const PRED_SPEED_SCALE_MAX = 80;
 
 // How fast an outstanding reconciliation offset (see _reconcileSelf)
 // bleeds toward zero, as a fraction removed per second. 8/sec means ~63%
@@ -164,6 +175,7 @@ const MP = {
       hud: document.getElementById('mp-hud'),
       hudRoom: document.getElementById('mp-hud-room'),
       hudScore: document.getElementById('mp-hud-score'),
+      hudLength: document.getElementById('mp-hud-length'),
       hudLives: document.getElementById('mp-hud-lives'),
       hudStatus: document.getElementById('mp-hud-status'),
       hudBoost: document.getElementById('mp-hud-boost'),
@@ -443,6 +455,7 @@ const MP = {
     if (!mine) return;
 
     this.el.hudScore.textContent = `Score: ${mine.score || 0}`;
+    this.el.hudLength.textContent = `Length: ${mine.length}`;
 
     // Lives shown as heart icons — mirrors single-player's HUD convention
     // (♥ per remaining life) rather than a plain number, so it reads at
@@ -529,6 +542,16 @@ const MP = {
   // (used both on room join and as a hard fallback if prediction was
   // never seeded for some reason, e.g. a respawn snapshot arriving before
   // the next predict tick runs).
+  // Length-based speed scaling — matches single-player's
+  // Snake._calcSpeed and sim.js's simCalcSpeed exactly, so a predicted
+  // snake of a given length moves at the same speed the host's
+  // simulation will actually simulate it at.
+  _calcPredSpeed(baseSpeed, length) {
+    const t = Math.max(0, Math.min(1, (length - PRED_SPEED_SCALE_MIN) / (PRED_SPEED_SCALE_MAX - PRED_SPEED_SCALE_MIN)));
+    const mul = PRED_SPEED_SMALL_MUL + (PRED_SPEED_LARGE_MUL - PRED_SPEED_SMALL_MUL) * t;
+    return baseSpeed * mul;
+  },
+
   _seedPredictedSelf(snake) {
     this._predictedSelf = {
       x: snake.segments[0].x,
@@ -566,10 +589,13 @@ const MP = {
     const dl = Math.hypot(p.dirX, p.dirY) || 1;
     p.dirX /= dl; p.dirY /= dl;
 
-    // Static mode: constant speed, no length-scaling, and boost has no
-    // length gate — length never changes (food is score-only), so both
-    // simplifications match server.js exactly.
-    const speed = p.boosting ? PRED_BOOST_SPEED : PRED_BASE_SPEED;
+    // Full-feature mode: length-based speed scaling, and boost is gated
+    // behind length > 6 (matching single-player/sim.js — a snake too
+    // short can't afford to boost since boosting costs length there;
+    // sim.js applies the same gate server-side).
+    const speed = (p.boosting && p.length > 6)
+      ? this._calcPredSpeed(PRED_BOOST_SPEED, p.length)
+      : this._calcPredSpeed(PRED_BASE_SPEED, p.length);
     p.x = Math.min(Math.max(p.x + p.dirX * speed * dt, PRED_EDGE_MARGIN), MP_WORLD_W - PRED_EDGE_MARGIN);
     p.y = Math.min(Math.max(p.y + p.dirY * speed * dt, PRED_EDGE_MARGIN), MP_WORLD_H - PRED_EDGE_MARGIN);
 
@@ -692,7 +718,10 @@ const MP = {
       this._pointer.y = clientY;
     };
     canvas.addEventListener('mousemove', (e) => setPointerFromEvent(e.clientX, e.clientY));
-    canvas.addEventListener('mousedown', () => { this._boosting = true; });
+    canvas.addEventListener('mousedown', (e) => {
+      if (this._isPointOnMinimap(e.clientX, e.clientY)) { this._openFullMap(); return; }
+      this._boosting = true;
+    });
     window.addEventListener('mouseup', () => { this._boosting = false; });
 
     // Touch: virtual joystick, matching single-player's game_part3.js —
@@ -702,9 +731,16 @@ const MP = {
     // jitter. A second finger is boost-only and never moves the
     // joystick, so steering and boosting can be done with two hands
     // independently instead of one touch doing both at once.
+    //
+    // A tap landing on the minimap opens the fullscreen map instead of
+    // claiming the joystick — checked first, same priority single-player
+    // gives it in game_part3.js.
     canvas.addEventListener('touchstart', (e) => {
       if (!this.inMatch) return;
       e.preventDefault();
+      for (const t of e.changedTouches) {
+        if (this._isPointOnMinimap(t.clientX, t.clientY)) { this._openFullMap(); return; }
+      }
       for (const t of e.changedTouches) {
         if (this._joystickTouchId === null && !this._joystick.active) {
           this._joystickTouchId = t.identifier;
@@ -1233,6 +1269,17 @@ const MP = {
            clientY >= rect.y && clientY <= rect.y + rect.h;
   },
 
+  // Opens the shared #fullmap-overlay (the same element single-player
+  // uses — see index.html's window._openFullMap). That global function
+  // already handles showing the overlay and starting a redraw loop; it
+  // calls whichever of window._game._drawFullMap / MP._drawFullMap
+  // exists depending on which mode is actually running, so this just
+  // has to make sure MP._drawFullMap exists (see below) and call it.
+  _openFullMap() {
+    if (!this.inMatch) return;
+    if (typeof window._openFullMap === 'function') window._openFullMap();
+  },
+
   // Small always-visible corner minimap — shows the whole 4000x4000
   // world, every snake's position (color-coded, AI dimmer than
   // players), and the current viewport rectangle, directly answering
@@ -1295,6 +1342,149 @@ const MP = {
 
     ctx.restore(); // clip
     ctx.restore();
+  },
+
+  // Fullscreen map — opened by tapping the small in-game minimap (see
+  // _openFullMap). Draws onto the SAME #fullmap-canvas single-player's
+  // _drawFullMap uses; index.html's shared redraw loop calls whichever
+  // of window._game._drawFullMap / MP._drawFullMap applies. Adapted from
+  // single-player's version to multiplayer's flat snake/segment data
+  // (no Snake/AISnake class instances, no this.player/this.snakes) and
+  // to read species/radiusMul/isBoss straight off the broadcast state
+  // instead of single-player's getSegmentR() helper.
+  _drawFullMap() {
+    if (!this.inMatch) return;
+    const canvas = document.getElementById('fullmap-canvas');
+    if (!canvas) return;
+
+    const dpr = this._dpr || 1;
+    const cssW = canvas.clientWidth || 300;
+    const cssH = canvas.clientHeight || 300;
+    const physW = Math.round(cssW * dpr), physH = Math.round(cssH * dpr);
+    if (canvas.width !== physW || canvas.height !== physH) {
+      canvas.width = physW;
+      canvas.height = physH;
+    }
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    const world = this._getInterpolatedWorld();
+    // Splice in the locally-predicted self, same as the main render loop
+    // does, so the player's own snake doesn't visibly lag the rest of
+    // the map by RENDER_DELAY_MS.
+    if (this._predictedSelf) {
+      const idx = world.snakes.findIndex((s) => s.id === this.mySnakeId);
+      const predictedAsSnake = { ...(idx >= 0 ? world.snakes[idx] : {}), id: this.mySnakeId, segments: this._predictedSelf.segments };
+      if (idx >= 0) world.snakes[idx] = predictedAsSnake; else world.snakes.push(predictedAsSnake);
+    }
+
+    const W = MP_WORLD_W, H = MP_WORLD_H;
+    const scale = Math.min(cssW / W, cssH / H);
+    const offX = (cssW - W * scale) / 2;
+    const offY = (cssH - H * scale) / 2;
+    const toX = (wx) => offX + wx * scale;
+    const toY = (wy) => offY + wy * scale;
+
+    ctx.fillStyle = '#050a0f';
+    ctx.fillRect(offX, offY, W * scale, H * scale);
+    ctx.strokeStyle = 'rgba(126,255,178,0.3)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(offX, offY, W * scale, H * scale);
+
+    ctx.fillStyle = 'rgba(126,255,178,0.35)';
+    for (const f of world.food) {
+      ctx.fillRect(toX(f.x) - 0.75, toY(f.y) - 0.75, 1.5, 1.5);
+    }
+
+    const rows = [];
+    const SAMPLE_STEP = 3;
+    const drawSnakeShape = (segs, color, lineWidth) => {
+      if (!segs || segs.length < 2) return;
+      ctx.beginPath();
+      ctx.moveTo(toX(segs[0].x), toY(segs[0].y));
+      for (let i = SAMPLE_STEP; i < segs.length; i += SAMPLE_STEP) {
+        ctx.lineTo(toX(segs[i].x), toY(segs[i].y));
+      }
+      const last = segs[segs.length - 1];
+      ctx.lineTo(toX(last.x), toY(last.y));
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lineWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    };
+
+    for (const s of world.snakes) {
+      if (!s.alive) continue;
+      const isMe = s.id === this.mySnakeId;
+
+      let color;
+      if (s.isBoss) {
+        const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.006);
+        color = `rgba(255,${Math.round(60 + pulse * 100)},20,1)`;
+      } else if (isMe) {
+        color = '#39ff6a';
+      } else {
+        color = s.color;
+      }
+
+      // Body thickness from the broadcast radiusMul (species size),
+      // scaled by the map's zoom — matches single-player's use of
+      // getSegmentR() for the same purpose, just reading the multiplier
+      // straight off network state instead of a shared helper function.
+      const worldRadius = SIM_SEGMENT_R_APPROX * (s.radiusMul || 1) * (s.isBoss ? 1.35 : 1);
+      const bodyWidth = Math.max(isMe ? 3 : 2.5, worldRadius * 2 * scale);
+      drawSnakeShape(s.segments, color, bodyWidth);
+
+      const head = s.segments[0];
+      const hx = toX(head.x), hy = toY(head.y);
+      ctx.beginPath();
+      if (isMe) { ctx.shadowColor = '#7effb2'; ctx.shadowBlur = 8; }
+      ctx.arc(hx, hy, Math.max(isMe ? 3 : 2.5, bodyWidth * (isMe ? 0.8 : 0.7)), 0, Math.PI * 2);
+      ctx.fillStyle = isMe ? '#7effb2' : color;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      const label = s.isBoss ? '👑 ' + s.name : (isMe ? `${s.name || 'You'} (You)` : s.name);
+      rows.push({
+        name: label, length: s.length,
+        color: s.isBoss ? '#ff3c14' : (isMe ? '#7effb2' : s.color),
+        x: Math.round(head.x), y: Math.round(head.y),
+        isBoss: !!s.isBoss, isPlayer: isMe,
+      });
+
+      if (isMe) {
+        // Current viewport, same as single-player's full-map "you are
+        // here" rectangle.
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        ctx.lineWidth = 1.5;
+        const vw = (window.innerWidth || 400) * scale;
+        const vh = (window.innerHeight || 800) * scale;
+        ctx.strokeRect(toX(this._camX), toY(this._camY), vw, vh);
+      }
+    }
+
+    const playerRow = rows.find((r) => r.isPlayer);
+    const others = rows.filter((r) => !r.isPlayer).sort((a, b) => b.length - a.length);
+    const sortedRows = playerRow ? [playerRow, ...others] : others;
+
+    this._renderFullMapList(sortedRows);
+  },
+
+  // Rebuilds the shared #fullmap-list DOM — same list element
+  // single-player's _renderFullMapList targets, just fed multiplayer's
+  // row data instead.
+  _renderFullMapList(rows) {
+    const list = document.getElementById('fullmap-list');
+    if (!list) return;
+    list.innerHTML = rows.map((r) => `
+      <div class="fullmap-row${r.isPlayer ? ' fullmap-row-you' : ''}${r.isBoss ? ' fullmap-row-boss' : ''}">
+        <span class="fullmap-row-dot" style="background:${r.color}"></span>
+        <span class="fullmap-row-name">${r.name}</span>
+        <span class="fullmap-row-len">${r.length}</span>
+      </div>
+    `).join('');
   },
 };
 
