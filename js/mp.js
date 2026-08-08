@@ -381,7 +381,7 @@ const MP = {
 
         // Reconcile local prediction against the authoritative snapshot —
         // the server is always right; this just decides how gently we
-        // catch up to it. See RECONCILE_LERP / RECONCILE_SNAP_DIST.
+        // catch up to it. See RECONCILE_DECAY_PER_SEC / RECONCILE_SNAP_DIST.
         const authSelf = msg.snakes.find((s) => s.id === this.mySnakeId);
         if (authSelf) this._reconcileSelf(authSelf);
         break;
@@ -562,6 +562,7 @@ const MP = {
       boosting: false,
       length: snake.length,
       segments: snake.segments.map((s) => ({ x: s.x, y: s.y })),
+      frozen: false, // see _advancePrediction's local collision check
     };
     this._lastPredictTime = performance.now();
   },
@@ -576,9 +577,19 @@ const MP = {
   // Also decays any pending reconciliation offset (see _reconcileSelf)
   // by the same dt, so the correction is one continuous per-frame slide
   // instead of a series of discrete jumps every time a snapshot arrives.
-  _advancePrediction(dt) {
+  _advancePrediction(dt, otherSnakes) {
     const p = this._predictedSelf;
     if (!p || dt <= 0) return;
+
+    // Frozen by a local collision prediction (see the check at the end
+    // of this function) — hold position and wait for the server's next
+    // snapshot to confirm the death (handled by _reconcileSelf) or, rarely,
+    // correct a false-positive local read. Not advancing here is what
+    // stops the "ghost sliding through the killer's body" look that
+    // happened before: previously the predicted snake kept moving locally
+    // for up to one tick (~50ms) after actually dying server-side, since
+    // nothing local knew it had died yet.
+    if (p.frozen) return;
 
     // Same lerp-toward-input formula single-player's PlayerSnake.update()
     // uses — 0.12 * dt * 60, kept unsimplified so it's easy to eyeball
@@ -654,6 +665,38 @@ const MP = {
       seg.x += dx * t;
       seg.y += dy * t;
     }
+
+    // Local collision prediction — check the head we just moved to
+    // against every other alive snake's body, using the same
+    // radius-scaled hit-test sim.js's authoritative collision check
+    // uses. This is what actually fixes the "hit lag" — without it, a
+    // collision was only ever known once the next server snapshot
+    // arrived (up to ~50ms later), during which the predicted snake kept
+    // sliding through the body that killed it. This local check can't
+    // be authoritative (only the host's simulation decides who really
+    // died — see sim.js), but freezing immediately on a locally-detected
+    // hit removes the visible delay in the common case, and
+    // _reconcileSelf still corrects this local guess against the real
+    // server state on the next snapshot regardless (unfreezing it again
+    // if this was a false positive, e.g. two bodies briefly overlapping
+    // on-screen from render-delay/interpolation without an actual
+    // server-side hit).
+    if (otherSnakes) {
+      const headX = p.segments[0].x, headY = p.segments[0].y;
+      for (const other of otherSnakes) {
+        if (other.id === this.mySnakeId || !other.alive) continue;
+        const hitDist = SIM_SEGMENT_R_APPROX * 1.3 * (other.radiusMul || 1); // matches sim.js's SEGMENT_R * 1.3 * radiusMul exactly — both are world units, no conversion needed
+        const hitDistSq = hitDist * hitDist;
+        for (let i = 3; i < other.segments.length; i++) {
+          const seg = other.segments[i];
+          const dx = seg.x - headX, dy = seg.y - headY;
+          if (dx * dx + dy * dy < hitDistSq) {
+            p.frozen = true;
+            return;
+          }
+        }
+      }
+    }
   },
 
   // Records how far off the predicted head is from the server's
@@ -681,6 +724,11 @@ const MP = {
 
     const p = this._predictedSelf;
     p.length = authSnake.length; // length itself is never predicted client-side, always trust the server
+    // Server confirms we're still alive — clear any local freeze from a
+    // collision prediction that turned out to be a false positive (e.g.
+    // two bodies briefly overlapping on-screen from render-delay without
+    // an actual server-side hit), so movement resumes.
+    p.frozen = false;
 
     const authHead = authSnake.segments[0];
     // Compare against the *simulation* position (p.x/p.y), not the
@@ -891,7 +939,7 @@ const MP = {
     const dt = Math.min(0.1, (now - (this._lastPredictTime || now)) / 1000); // clamp so a tab-switch stall can't produce one giant leap
     this._lastPredictTime = now;
     if (this._predictedSelf) {
-      this._advancePrediction(dt);
+      this._advancePrediction(dt, world.snakes);
       const idx = world.snakes.findIndex((s) => s.id === this.mySnakeId);
       const predictedAsSnake = {
         ...(idx >= 0 ? world.snakes[idx] : {}),
@@ -918,25 +966,35 @@ const MP = {
     // meaningful even though it covers the whole screen.
     this._drawBackgroundGrid(ctx, logW, logH, camX, camY);
 
-    // Food — single beginPath()/fill() for the whole batch instead of
-    // one per food item. This was the main render-cost issue: with ~80
-    // food items each doing their own beginPath+arc+fill, that's 80
-    // separate draw calls every frame just for food, before snakes are
-    // even drawn. Lifeline food (rare, capped at 1 on the map) is drawn
-    // separately in a distinct pink so it reads as clearly special —
-    // still just one extra beginPath()/fill() pair even when present.
-    ctx.shadowColor = '#ffdd00';
-    ctx.shadowBlur = 8;
-    ctx.fillStyle = '#ffdd00';
-    ctx.beginPath();
+    // Food — grouped by color, one beginPath()/fill() batch per color
+    // group instead of one per food item. This keeps the original perf
+    // win (avoiding ~80 separate draw calls/frame) while actually
+    // rendering each food's assigned color (see SIM_FOOD_COLORS in
+    // sim.js) instead of a single hardcoded yellow for every item —
+    // at most 8 batches (one per color in the palette), still far
+    // cheaper than one draw call per item. Lifeline food (rare, capped
+    // at 1 on the map) is drawn separately afterward in a distinct pink
+    // so it reads as clearly special regardless of its own color field.
+    const foodByColor = new Map();
     for (const f of world.food) {
       if (f.isLifeline) continue;
       const sx = f.x - camX, sy = f.y - camY;
       if (sx < -20 || sx > logW + 20 || sy < -20 || sy > logH + 20) continue;
-      ctx.moveTo(sx + 6, sy);
-      ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+      const color = f.color || '#ffdd00'; // fallback for any food item that somehow lacks a color
+      if (!foodByColor.has(color)) foodByColor.set(color, []);
+      foodByColor.get(color).push({ sx, sy });
     }
-    ctx.fill();
+    for (const [color, pts] of foodByColor) {
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      for (const { sx, sy } of pts) {
+        ctx.moveTo(sx + 6, sy);
+        ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+      }
+      ctx.fill();
+    }
     ctx.shadowBlur = 0;
 
     ctx.shadowColor = '#ff5f9e';
@@ -955,12 +1013,16 @@ const MP = {
 
     this._drawSnakes(ctx, world, camX, camY, logW, logH);
 
-    // World boundary — draws the actual edge of the 4000x4000 world as a
-    // visible wall whenever it's anywhere near the viewport, so hitting
-    // it never comes as a surprise. This directly addresses "boundary
-    // pata nahi chalti" — previously there was no indication at all that
-    // an edge existed until the snake's movement got clamped there.
-    this._drawWorldBoundary(ctx, camX, camY, logW, logH);
+    // World boundary — single-player's "electric fence" border: animated
+    // dashes running the full perimeter (so corners naturally connect —
+    // it's one continuous dashed path around all 4 edges, not 4
+    // independent lines), pulsing brightness, and turning red near the
+    // player's own position. Replaces an earlier L-shaped
+    // corner-warning-only design that only appeared near corners and
+    // looked static/disconnected compared to single-player's always-on
+    // animated version.
+    this._drawWorldBorder(ctx, camX, camY, logW, logH);
+    this._drawWallWarning(ctx, logW, logH);
 
     // Minimap — small corner overview showing the whole world, every
     // snake's position, and the boundary, so "kaha hu me aur mera dost"
@@ -1158,93 +1220,100 @@ const MP = {
   // Only pays any drawing cost when an edge is actually close enough to
   // matter (early-outs per edge otherwise), so this is free for the vast
   // majority of a match spent away from the boundary.
-  _drawWorldBoundary(ctx, camX, camY, logW, logH) {
-    const warnDist = 260; // start showing the warning glow this far from the true edge, in world units
+  /* ANIMATED ELECTRIC FENCE BORDER — ported from single-player's
+     _drawWorldBorder exactly (game_part4.js), just substituting
+     MP_WORLD_W/H for single-player's world size and reading the local
+     player's position from the predicted-self head instead of
+     this.player.head. One continuous dashed path is distributed around
+     the FULL perimeter (all 4 edges combined, not 4 independent lines),
+     which is what makes corners connect naturally — the earlier
+     L-shape-warning design drew each edge as its own separate strip and
+     never looked "attached" at the corners the way this does.
 
-    const leftNear = camX < warnDist;
-    const rightNear = camX + logW > MP_WORLD_W - warnDist;
-    const topNear = camY < warnDist;
-    const bottomNear = camY + logH > MP_WORLD_H - warnDist;
+     Perf notes (same as single-player):
+     - Only draws dashes near the camera viewport, not all 200 every frame.
+     - shadowBlur applied ONCE per frame instead of per-dash. */
+  _drawWorldBorder(ctx, camX, camY, logW, logH) {
+    const W = MP_WORLD_W, H = MP_WORLD_H;
+    const x = -camX, y = -camY;
+    const now = Date.now();
 
-    // How far each edge's strip is clipped in from the perpendicular
-    // screen edges, when the corner on that end is also "near". Without
-    // this, being in a corner (e.g. top-left) draws the left edge's
-    // vertical strip the FULL screen height and the top edge's
-    // horizontal strip the FULL screen width — together forming a
-    // full-screen "+" that cuts across the whole view. Real-world
-    // corners look like an L, not a plus: the left wall should only
-    // extend down to where the top wall begins, and vice versa. Clipping
-    // each strip to stop at warnDist past the other near edge produces
-    // exactly that L shape instead.
-    const topClip = topNear ? warnDist - camY : 0;
-    const bottomClip = bottomNear ? warnDist - (MP_WORLD_H - (camY + logH)) : 0;
-    const leftClip = leftNear ? warnDist - camX : 0;
-    const rightClip = rightNear ? warnDist - (MP_WORLD_W - (camX + logW)) : 0;
+    let isRed = false;
+    if (this._predictedSelf) {
+      const hx = this._predictedSelf.x, hy = this._predictedSelf.y;
+      isRed = Math.min(hx, W - hx, hy, H - hy) < 200;
+    }
+
+    const brightness = 0.5 + 0.5 * Math.sin(now * 0.005);
+    const flash = 0.5 + 0.5 * Math.sin(now * 0.008);
+
+    ctx.save();
+    if (isRed) {
+      ctx.strokeStyle = `rgba(255,${Math.round(50 * flash)},${Math.round(50 * flash)},${(0.5 + brightness * 0.5).toFixed(2)})`;
+      ctx.shadowColor = 'rgba(255,50,50,0.8)';
+    } else {
+      ctx.strokeStyle = `rgba(126,255,178,${(0.2 + brightness * 0.6).toFixed(2)})`;
+      ctx.shadowColor = '#7effb2';
+    }
+    ctx.shadowBlur = 10 + brightness * 6;
+    ctx.lineWidth = 2 + brightness;
+
+    const DASH_COUNT = 200;
+    const PERIMETER = W * 2 + H * 2;
+    const dashLen = 8;
+    const margin = 40;
 
     const edges = [
-      { side: 'left',   worldPos: 0,          near: leftNear },
-      { side: 'right',  worldPos: MP_WORLD_W, near: rightNear },
-      { side: 'top',    worldPos: 0,          near: topNear },
-      { side: 'bottom', worldPos: MP_WORLD_H, near: bottomNear },
+      { x1: 0, y1: 0, x2: W, y2: 0 },
+      { x1: W, y1: 0, x2: W, y2: H },
+      { x1: W, y1: H, x2: 0, y2: H },
+      { x1: 0, y1: H, x2: 0, y2: 0 },
     ];
 
+    ctx.beginPath();
     for (const edge of edges) {
-      if (!edge.near) continue;
-      ctx.save();
-      if (edge.side === 'left' || edge.side === 'right') {
-        const screenX = edge.worldPos - camX;
-        // Clip the vertical strip's top/bottom to stop at the nearby
-        // corner's L-bend instead of running the full screen height.
-        const y0 = Math.max(0, topClip);
-        const y1 = logH - Math.max(0, bottomClip);
-        if (y1 <= y0) { ctx.restore(); continue; } // fully clipped away (extreme corner case), nothing to draw
-        ctx.beginPath();
-        ctx.rect(0, y0, logW, y1 - y0);
-        ctx.clip();
+      const len = Math.sqrt((edge.x2 - edge.x1) ** 2 + (edge.y2 - edge.y1) ** 2);
+      const dashCount = Math.round(DASH_COUNT * (len / PERIMETER));
+      const nx = (edge.x2 - edge.x1) / len;
+      const ny = (edge.y2 - edge.y1) / len;
 
-        const grad = ctx.createLinearGradient(
-          screenX + (edge.side === 'left' ? warnDist : -warnDist), 0,
-          screenX, 0
-        );
-        grad.addColorStop(0, 'rgba(255,60,60,0)');
-        grad.addColorStop(1, 'rgba(255,60,60,0.28)');
-        ctx.fillStyle = grad;
-        const rectX = edge.side === 'left' ? screenX : screenX - warnDist;
-        ctx.fillRect(rectX, y0, warnDist, y1 - y0);
-        ctx.strokeStyle = 'rgba(255,80,80,0.9)';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(screenX, y0);
-        ctx.lineTo(screenX, y1);
-        ctx.stroke();
-      } else {
-        const screenY = edge.worldPos - camY;
-        // Same L-bend clipping, on the perpendicular (horizontal) axis.
-        const x0 = Math.max(0, leftClip);
-        const x1 = logW - Math.max(0, rightClip);
-        if (x1 <= x0) { ctx.restore(); continue; }
-        ctx.beginPath();
-        ctx.rect(x0, 0, x1 - x0, logH);
-        ctx.clip();
+      for (let i = 0; i < dashCount; i++) {
+        const t = i / dashCount;
+        const px = edge.x1 + nx * len * t;
+        const py = edge.y1 + ny * len * t;
+        const sx = x + px, sy = y + py;
 
-        const grad = ctx.createLinearGradient(
-          0, screenY + (edge.side === 'top' ? warnDist : -warnDist),
-          0, screenY
-        );
-        grad.addColorStop(0, 'rgba(255,60,60,0)');
-        grad.addColorStop(1, 'rgba(255,60,60,0.28)');
-        ctx.fillStyle = grad;
-        const rectY = edge.side === 'top' ? screenY : screenY - warnDist;
-        ctx.fillRect(x0, rectY, x1 - x0, warnDist);
-        ctx.strokeStyle = 'rgba(255,80,80,0.9)';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(x0, screenY);
-        ctx.lineTo(x1, screenY);
-        ctx.stroke();
+        if (sx < -margin || sx > logW + margin || sy < -margin || sy > logH + margin) continue;
+
+        ctx.moveTo(sx - nx * dashLen / 2, sy - ny * dashLen / 2);
+        ctx.lineTo(sx + nx * dashLen / 2, sy + ny * dashLen / 2);
       }
-      ctx.restore();
     }
+    ctx.stroke();
+
+    ctx.restore();
+  },
+
+  // Full-screen red vignette when close to any edge — ported from
+  // single-player's _drawWallWarning exactly, reading position from the
+  // predicted-self head instead of this.player.head.
+  _drawWallWarning(ctx, logW, logH) {
+    if (!this._predictedSelf) return;
+    const W = MP_WORLD_W, H = MP_WORLD_H;
+    const hx = this._predictedSelf.x, hy = this._predictedSelf.y;
+    const nearest = Math.min(hx, W - hx, hy, H - hy);
+    const dangerZoneDist = 200; // matches single-player's DANGER_ZONE_DIST
+    if (nearest >= dangerZoneDist) return;
+
+    const intensity = (1 - nearest / dangerZoneDist) * 0.5;
+    const grad = ctx.createRadialGradient(
+      logW / 2, logH / 2, logH * 0.3,
+      logW / 2, logH / 2, logH * 0.8
+    );
+    grad.addColorStop(0, 'rgba(255,40,40,0)');
+    grad.addColorStop(1, `rgba(255,40,40,${intensity.toFixed(2)})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, logW, logH);
   },
 
   // Shared geometry for the minimap rect — used both for drawing it and
