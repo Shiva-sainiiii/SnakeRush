@@ -44,9 +44,12 @@ const SIM_WORLD_H = 4000;
 const SIM_TICK_RATE = 20;                  // simulation steps per second
 const SIM_TICK_MS = 1000 / SIM_TICK_RATE;
 
-// Static mode: speed is constant, not length-scaled — length is fixed at
-// START_LEN for the whole match (food is score-only, see the food-eat
-// handler), so there's nothing for speed to scale against.
+// Full-featured mode: length grows from food (see food-eat handler) and
+// speed scales with length, exactly matching single-player's
+// Snake._calcSpeed. This replaces the earlier "static mode" simplification
+// (constant speed, fixed length) — the person explicitly asked for full
+// feature parity with single-player, trade-offs and all (more moving
+// parts to keep in sync between this file and game_part*.js).
 const SIM_BASE_SPEED = 190;                // world units/sec — matches single-player BASE_SPEED
 const SIM_BOOST_SPEED = 300;               // matches single-player BOOST_SPEED
 const SIM_SEGMENT_GAP = 8;                 // matches single-player SEGMENT_GAP
@@ -56,6 +59,14 @@ const SIM_FOOD_COUNT = 80;
 const SIM_FOOD_R = 6;
 const SIM_MAX_PLAYERS = 4;                 // headroom above the requested 2-3
 
+// Length-based speed scaling — small snakes move faster, large snakes
+// move slower. Matches single-player's SPEED_SMALL_MUL/SPEED_LARGE_MUL/
+// SPEED_SCALE_MIN/SPEED_SCALE_MAX exactly (game_part1.js).
+const SIM_SPEED_SMALL_MUL = 1.13;
+const SIM_SPEED_LARGE_MUL = 0.87;
+const SIM_SPEED_SCALE_MIN = 10;
+const SIM_SPEED_SCALE_MAX = 80;
+
 const SIM_PLAYER_LIVES = 3;
 const SIM_RESPAWN_DELAY = 2;               // seconds a dead player waits before respawning
 const SIM_POINTS_PER_FOOD = 1;
@@ -63,13 +74,81 @@ const SIM_POINTS_PER_KILL = 10;
 const SIM_LIFELINE_SPAWN_CHANCE = 0.01;    // rolled once whenever a food item respawns
 const SIM_LIFELINE_MAX_ON_MAP = 1;
 
+// ── AI — species, personality, FSM. Ported from game_part2.js's
+// AISnake as closely as the server-authoritative context allows. Two
+// things single-player has that are dropped here, deliberately:
+//   - foodGrid (a spatial-partitioning structure for fast nearest-food
+//     queries) — sim.js's food list is small enough (SIM_FOOD_COUNT=80)
+//     that a linear scan per AI is fine, so nearbyFood is just a filtered
+//     array instead of a grid-query result. Functionally identical, just
+//     without the perf structure single-player needed at much higher
+//     food/entity counts.
+//   - window._game._difficultyT (single-player's "run gets harder over
+//     time" global) — there's no equivalent single-player session-timer
+//     concept in a shared multiplayer match, so the difficulty curve
+//     that scales SNAKE_SENSE_R/MAX_FORCE/STEER_LERP/pursueThreshold
+//     over time is left out. AI strength here is constant for the whole
+//     match, at the personality/species-tuned base values.
+const SIM_SNAKE_SPECIES = [
+  { id: 'hatchling', label: 'Hatchling',      minLen: 5,  maxLen: 7,   radiusMul: 0.55, speedMul: 1.00, weight: 20, scoreMul: 0.6 },
+  { id: 'garter',    label: 'Garter Snake',   minLen: 8,  maxLen: 13,  radiusMul: 0.72, speedMul: 1.28, weight: 26, scoreMul: 0.8 },
+  { id: 'viper',     label: 'Viper',          minLen: 14, maxLen: 20,  radiusMul: 1.00, speedMul: 1.15, weight: 24, scoreMul: 1.0 },
+  { id: 'python',    label: 'Python',         minLen: 26, maxLen: 36,  radiusMul: 1.35, speedMul: 0.95, weight: 16, scoreMul: 1.4 },
+  { id: 'anaconda',  label: 'Anaconda',       minLen: 42, maxLen: 58,  radiusMul: 1.75, speedMul: 0.82, weight: 8,  scoreMul: 2.0 },
+  { id: 'slug',      label: 'Slug',           minLen: 10, maxLen: 16,  radiusMul: 0.95, speedMul: 0.55, weight: 10, scoreMul: 0.9, moveStyle: 'slug' },
+  { id: 'centipede', label: 'Centipede',      minLen: 10, maxLen: 16,  radiusMul: 0.8,  speedMul: 1.35, weight: 12, scoreMul: 1.1, moveStyle: 'centipede' },
+  { id: 'ant',       label: 'Ant',            minLen: 4,  maxLen: 6,   radiusMul: 0.4,  speedMul: 1.6,  weight: 14, scoreMul: 0.5, moveStyle: 'insect' },
+  // Boss tier: weight 0 so simPickSpecies() never rolls it by chance —
+  // only ever assigned directly by a dedicated boss-spawn call, same as
+  // single-player.
+  { id: 'titan',     label: 'Titan Serpent',  minLen: 95, maxLen: 130, radiusMul: 2.4,  speedMul: 0.9,  weight: 0,  scoreMul: 5.0 },
+];
+const SIM_CENTIPEDE_SPECIES = SIM_SNAKE_SPECIES.find((sp) => sp.id === 'centipede');
+const SIM_OTHER_SPECIES = SIM_SNAKE_SPECIES.filter((sp) => sp.id !== 'centipede' && sp.id !== 'titan');
+const SIM_OTHER_SPECIES_TOTAL_WEIGHT = SIM_OTHER_SPECIES.reduce((s, sp) => s + sp.weight, 0);
+
+// Exactly half of all normal AI spawns are centipedes; the other half is
+// a weighted pick across every other non-boss species — matches
+// single-player's pickSpecies() exactly, including the reasoning for the
+// flat coin-flip instead of folding centipede into the weighted pool.
+function simPickSpecies() {
+  if (Math.random() < 0.5) return SIM_CENTIPEDE_SPECIES;
+  let r = Math.random() * SIM_OTHER_SPECIES_TOTAL_WEIGHT;
+  for (const sp of SIM_OTHER_SPECIES) {
+    r -= sp.weight;
+    if (r <= 0) return sp;
+  }
+  return SIM_OTHER_SPECIES[SIM_OTHER_SPECIES.length - 1];
+}
+
+const SIM_AI_PERSONALITIES = ['aggressive', 'coward', 'hunter', 'farmer'];
+
+// Hysteresis enter/exit thresholds — matches single-player's HYSTERESIS
+// table exactly. enter = seconds a condition must hold continuously
+// before the FSM commits to that state; this is what stops the AI
+// flickering between states every tick when a condition is borderline.
+const SIM_HYSTERESIS = {
+  PURSUE:    { enter: 0.12, exit: 0.40 },
+  FLEE:      { enter: 0.15, exit: 0.50 },
+  AVOID:     { enter: 0.05, exit: 0.20 },
+  SEEK_FOOD: { enter: 0.0,  exit: 0.10 },
+};
+const SIM_AI_STATE = {
+  WANDER: 'WANDER', SEEK_FOOD: 'SEEK_FOOD',
+  AVOID: 'AVOID', FLEE: 'FLEE', PURSUE: 'PURSUE',
+};
+
 const SIM_AI_COUNT = 4;
-const SIM_AI_START_LEN = 10;
-const SIM_AI_SPEED_MUL = 0.85;
-const SIM_AI_AVOID_RADIUS = 70;
-const SIM_AI_WANDER_TURN_INTERVAL = [2, 5];
-const SIM_AI_STEER_EVERY_N_TICKS = 3;
 const SIM_AI_RESPAWN_DELAY = 4;
+// Titan Serpent boss timer — matches single-player's BOSS_INTERVAL_MIN/MAX
+// and rollBossInterval(): first boss arrives 70-110s into the match, then
+// again every 70-110s after the previous one dies, capped at one alive
+// at a time.
+const SIM_BOSS_INTERVAL_MIN = 70;
+const SIM_BOSS_INTERVAL_MAX = 110;
+function simRollBossInterval() {
+  return SIM_BOSS_INTERVAL_MIN + Math.random() * (SIM_BOSS_INTERVAL_MAX - SIM_BOSS_INTERVAL_MIN);
+}
 const SIM_AI_NAMES = [
   'Viper', 'Zigzag', 'Nibbles', 'Slither', 'Fang', 'Coil', 'Scales',
   'Rattler', 'Whiskers', 'Noodle', 'Zippy', 'Dash', 'Shadow', 'Comet',
@@ -80,7 +159,20 @@ const SIM_AI_NAMES = [
 const SIM_AI_SKIN_POOL = ['multicolour', 'fatty', 'thin', 'designer'];
 
 const SIM_PLAYER_COLORS = ['#39ff6a', '#ff5f9e', '#2fb8ff', '#ffb300'];
+// AI body colors are now derived from species/personality visuals client-
+// side (see mp.js's AI rendering), but a color is still assigned here as
+// a network-cheap fallback/identifier and for any client that doesn't
+// special-case AI rendering.
 const SIM_AI_COLORS = ['#c47eff', '#ff9a5c', '#5cd6c4', '#e0e05c', '#ff7e9e', '#7ea8ff'];
+
+// Food colors — purely cosmetic variety, matches single-player's
+// FOOD_COLORS. Growth amount is identical regardless of color (the
+// person explicitly asked for visual variety only, not a
+// different-value food-type system).
+const SIM_FOOD_COLORS = [
+  '#ff5e57', '#ffa41b', '#ffdd00', '#7bff6a',
+  '#00d2ff', '#8c52ff', '#ff52c0', '#52ffca',
+];
 
 function simClamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
@@ -89,6 +181,15 @@ function simRandomFoodPos() {
     x: 40 + Math.random() * (SIM_WORLD_W - 80),
     y: 40 + Math.random() * (SIM_WORLD_H - 80),
   };
+}
+
+// Length-based speed scaling — matches single-player's Snake._calcSpeed
+// exactly, so a snake of a given length moves at the same speed here as
+// it would in single-player.
+function simCalcSpeed(baseSpeed, length) {
+  const t = simClamp((length - SIM_SPEED_SCALE_MIN) / (SIM_SPEED_SCALE_MAX - SIM_SPEED_SCALE_MIN), 0, 1);
+  const mul = SIM_SPEED_SMALL_MUL + (SIM_SPEED_LARGE_MUL - SIM_SPEED_SMALL_MUL) * t;
+  return baseSpeed * mul;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -103,12 +204,14 @@ class Simulation {
     this.entities = new Map();  // id -> snake — EVERY snake (players + AI)
     this.food = [];
     for (let i = 0; i < SIM_FOOD_COUNT; i++) {
-      this.food.push({ id: i, ...simRandomFoodPos() });
+      this.food.push({ id: i, ...simRandomFoodPos(), color: SIM_FOOD_COLORS[Math.floor(Math.random() * SIM_FOOD_COLORS.length)] });
     }
     this._nextFoodId = SIM_FOOD_COUNT;
     this._usedAIColors = 0;
     this._lifelineCount = 0;
     this._aiTickCounter = 0;
+    this._bossTimer = simRollBossInterval();
+    this._bossActiveId = null; // entity id of the currently-alive Titan, or null
 
     // Called with the { type: 'state', food, snakes } payload every tick
     // — the host's mp.js sets this to something that forwards the
@@ -147,6 +250,12 @@ class Simulation {
       segments,
       color,
       isAI: false,
+      // Species/personality fields default to a plain "no species" snake
+      // (a real player). AI snakes get these overwritten in
+      // _spawnOneAI/_spawnBoss right after creation.
+      species: null,
+      personality: null,
+      radiusMul: 1,
     };
   }
 
@@ -160,6 +269,10 @@ class Simulation {
     snake.skin = typeof skin === 'string' && skin ? skin : 'multicolour';
     snake.lives = SIM_PLAYER_LIVES;
     snake._respawnTimer = 0;
+    // isPlayer distinguishes a real human from an AI for AI targeting
+    // logic (e.g. the 'hunter' personality always prioritizes chasing a
+    // player over other AI) — matches single-player's Snake.isPlayer.
+    snake.isPlayer = true;
     this.players.set(playerId, { snake, name });
     this.entities.set(playerId, snake);
     return snake;
@@ -176,18 +289,137 @@ class Simulation {
     }
   }
 
+  // Applies a species (body plan: length range, speed multiplier,
+  // radius, move style) and, separately, a personality (behavior:
+  // aggressive/coward/hunter/farmer) to an AI snake — matches
+  // single-player's AISnake constructor + _applyPersonality exactly.
+  // The two are independent axes: species picks WHAT it looks like and
+  // its base spawn size, personality picks HOW it behaves.
+  _applySpeciesAndPersonality(snake, species, personality) {
+    snake.species = species.id;
+    snake.speciesLabel = species.label;
+    snake.radiusMul = species.radiusMul;
+    snake.scoreMul = species.scoreMul;
+    snake.isBoss = species.id === 'titan';
+    snake.moveStyle = species.moveStyle || null;
+    snake._wiggleT = Math.random() * 10;
+
+    snake.personality = personality;
+
+    // AI sensing/steering tuning — base values before personality
+    // overrides below. Matches single-player's AISnake constructor.
+    snake._wanderAngle = Math.random() * Math.PI * 2;
+    snake._wanderDist = 55;
+    snake._wanderRadius = 30;
+    snake._wanderJitter = 1.2;
+    snake.FOOD_RADIUS = 180;
+    snake.SNAKE_SENSE_R = 220;
+    snake.BODY_SENSE_R = 110;
+    snake.LOOKAHEAD_STEPS = 5;
+    snake.LOOKAHEAD_DIST = 42;
+    snake.MAX_FORCE = 0.20;
+    snake.STEER_LERP = 8.0;
+    snake._urgentTurnMul = 1.8;
+    snake.pursueThreshold = 8;
+    snake.fleeThreshold = 8;
+
+    switch (personality) {
+      case 'aggressive':
+        snake.pursueThreshold = 4;
+        snake.fleeThreshold = 25;
+        snake.MAX_FORCE = 0.26;
+        snake.STEER_LERP = 10.0;
+        snake._speedPersonalityMul = 1.08;
+        break;
+      case 'coward':
+        snake.pursueThreshold = 30;
+        snake.fleeThreshold = 4;
+        snake.MAX_FORCE = 0.22;
+        snake.STEER_LERP = 9.0;
+        snake._speedPersonalityMul = 0.95;
+        break;
+      case 'hunter':
+        snake.SNAKE_SENSE_R = 380;
+        snake.MAX_FORCE = 0.24;
+        snake.STEER_LERP = 9.5;
+        snake._speedPersonalityMul = 1.05;
+        break;
+      case 'boss':
+        snake.SNAKE_SENSE_R = 600;
+        snake.FOOD_RADIUS = 260;
+        snake.pursueThreshold = -999;
+        snake.fleeThreshold = 999;
+        snake.MAX_FORCE = 0.18;
+        snake.STEER_LERP = 7.0;
+        snake._speedPersonalityMul = 1.03;
+        break;
+      case 'farmer':
+        snake.FOOD_RADIUS = 320;
+        snake.SNAKE_SENSE_R = 80;
+        snake.pursueThreshold = 999;
+        snake._speedPersonalityMul = 1;
+        break;
+      default:
+        snake._speedPersonalityMul = 1;
+    }
+
+    snake._hyst = { PURSUE: 0, FLEE: 0, AVOID: 0, SEEK_FOOD: 0 };
+    snake._fleeTarget = null;
+    snake._pursueTarget = null;
+    snake._avoidNormal = null;
+    snake.state = SIM_AI_STATE.WANDER;
+  }
+
   _spawnOneAI(id) {
+    const species = simPickSpecies();
+    const spawnLen = species.minLen + Math.floor(Math.random() * (species.maxLen - species.minLen + 1));
     const spawn = simRandomFoodPos();
     const name = SIM_AI_NAMES[Math.floor(Math.random() * SIM_AI_NAMES.length)];
     const color = SIM_AI_COLORS[this._usedAIColors % SIM_AI_COLORS.length];
     this._usedAIColors++;
     const snake = this._makeSnake(id, spawn.x, spawn.y, name, color);
     snake.isAI = true;
-    snake.length = SIM_AI_START_LEN;
+    snake.length = spawnLen;
     snake.skin = SIM_AI_SKIN_POOL[Math.floor(Math.random() * SIM_AI_SKIN_POOL.length)];
-    snake._wanderT = Math.random() * 10;
-    snake._nextWanderChange = 0;
+    const personality = SIM_AI_PERSONALITIES[Math.floor(Math.random() * SIM_AI_PERSONALITIES.length)];
+    this._applySpeciesAndPersonality(snake, species, personality);
     this.entities.set(id, snake);
+    return snake;
+  }
+
+  // Titan Serpent — a rare, much bigger/tougher AI that shows up
+  // periodically (see _bossTimer in _tick). Spawns away from every real
+  // player (bigger exclusion radius than normal AI respawns — appearing
+  // near a player should feel like an event, not an ambush), matching
+  // single-player's _spawnBoss exactly except "away from the player"
+  // becomes "away from every connected player" in a multi-human match.
+  _spawnBoss() {
+    const titanSpecies = SIM_SNAKE_SPECIES.find((s) => s.id === 'titan');
+    if (!titanSpecies) return;
+
+    let x, y, tries = 0;
+    const tooCloseToAnyPlayer = () => {
+      for (const { snake } of this.players.values()) {
+        if (!snake.alive) continue;
+        const dx = x - snake.x, dy = y - snake.y;
+        if (dx * dx + dy * dy < 900 * 900) return true;
+      }
+      return false;
+    };
+    do {
+      x = 300 + Math.random() * (SIM_WORLD_W - 600);
+      y = 300 + Math.random() * (SIM_WORLD_H - 600);
+      tries++;
+    } while (tooCloseToAnyPlayer() && tries < 10);
+
+    const id = `boss-${Date.now()}`;
+    const snake = this._makeSnake(id, x, y, 'Titan Serpent', '#7a1010');
+    snake.isAI = true;
+    snake.length = titanSpecies.minLen + Math.floor(Math.random() * (titanSpecies.maxLen - titanSpecies.minLen + 1));
+    snake.skin = SIM_AI_SKIN_POOL[Math.floor(Math.random() * SIM_AI_SKIN_POOL.length)];
+    this._applySpeciesAndPersonality(snake, titanSpecies, 'boss');
+    this.entities.set(id, snake);
+    this._bossActiveId = id;
     return snake;
   }
 
@@ -208,6 +440,21 @@ class Simulation {
   _tick() {
     const dt = SIM_TICK_MS / 1000;
 
+    // Titan Serpent boss timer — matches single-player: counts down only
+    // while no boss is currently alive, spawns one on hitting zero, then
+    // re-rolls the interval for next time.
+    if (!this._bossActiveId) {
+      this._bossTimer -= dt;
+      if (this._bossTimer <= 0) {
+        this._spawnBoss();
+        this._bossTimer = simRollBossInterval();
+      }
+    } else if (!this.entities.has(this._bossActiveId) || !this.entities.get(this._bossActiveId).alive) {
+      // The boss died (or was removed) — clear the flag so the timer
+      // above starts counting down toward the next one.
+      this._bossActiveId = null;
+    }
+
     this._aiTickCounter = (this._aiTickCounter + 1) % SIM_AI_STEER_EVERY_N_TICKS;
     if (this._aiTickCounter === 0) {
       for (const snake of this.entities.values()) {
@@ -225,8 +472,22 @@ class Simulation {
       const dl = Math.hypot(snake.dirX, snake.dirY) || 1;
       snake.dirX /= dl; snake.dirY /= dl;
 
-      const speedMul = snake.isAI ? SIM_AI_SPEED_MUL : 1;
-      const speed = (snake.boosting ? SIM_BOOST_SPEED : SIM_BASE_SPEED) * speedMul;
+      // Length-based speed scaling (simCalcSpeed) now applies to
+      // everyone, matching single-player. AI additionally layers its
+      // species speedMul and personality speedMul on top — matches
+      // AISnake.update()'s speed calculation exactly. A real player has
+      // neither, so speciesMul/personalityMul default to 1 for them.
+      const speciesMul = snake.isAI && snake.species
+        ? SIM_SNAKE_SPECIES.find((s) => s.id === snake.species).speedMul
+        : 1;
+      const personalityMul = snake.isAI ? (snake._speedPersonalityMul || 1) : 1;
+      const baseSpeed = simCalcSpeed(SIM_BASE_SPEED * speciesMul * personalityMul, snake.length);
+      const boostSpeed = simCalcSpeed(SIM_BOOST_SPEED * speciesMul * personalityMul, snake.length);
+      const speed = (snake.boosting && snake.length > 6) ? boostSpeed : baseSpeed;
+      // Stashed for _aiPursue/_aiEvade's lookahead prediction (they need
+      // to know how fast the target snake is currently moving, not just
+      // its direction, to predict where it'll be a moment from now).
+      snake._lastSpeed = speed;
       snake.x = simClamp(snake.x + snake.dirX * speed * dt, SIM_SEGMENT_R, SIM_WORLD_W - SIM_SEGMENT_R);
       snake.y = simClamp(snake.y + snake.dirY * speed * dt, SIM_SEGMENT_R, SIM_WORLD_H - SIM_SEGMENT_R);
 
@@ -255,7 +516,10 @@ class Simulation {
       }
     }
 
-    // Food collisions
+    // Food collisions — growth is back (full-feature mode): both players
+    // and AI grow from food, matching single-player exactly. Real
+    // players also earn score; AI doesn't track score since it's never
+    // shown anywhere for them.
     for (const snake of this.entities.values()) {
       if (!snake.alive) continue;
       for (let i = this.food.length - 1; i >= 0; i--) {
@@ -268,31 +532,52 @@ class Simulation {
           if (f.isLifeline) {
             if (!snake.isAI && snake.lives < SIM_PLAYER_LIVES) snake.lives += 1;
           } else {
+            snake.length += 1;
             if (!snake.isAI) snake.score += SIM_POINTS_PER_FOOD;
           }
 
           const np = simRandomFoodPos();
           const isLifeline = this._lifelineCount < SIM_LIFELINE_MAX_ON_MAP && Math.random() < SIM_LIFELINE_SPAWN_CHANCE;
           if (isLifeline) this._lifelineCount++;
-          this.food.push({ id: this._nextFoodId++, ...np, isLifeline });
+          this.food.push({
+            id: this._nextFoodId++,
+            ...np,
+            isLifeline,
+            // Purely cosmetic — see SIM_FOOD_COLORS. Growth amount above
+            // is identical regardless of which color gets picked here.
+            color: SIM_FOOD_COLORS[Math.floor(Math.random() * SIM_FOOD_COLORS.length)],
+          });
         }
       }
     }
 
-    // Snake-vs-snake collision
-    const hitDistSq = (SIM_SEGMENT_R * 1.3) * (SIM_SEGMENT_R * 1.3);
+    // Snake-vs-snake collision — hit radius now scales with the
+    // target's species radiusMul (a Titan's body is much thicker to
+    // collide with than a Hatchling's), matching single-player's
+    // radius-based hit-testing instead of a flat SEGMENT_R for everyone.
     const aliveEntities = [...this.entities.values()].filter(s => s.alive);
     for (const a of aliveEntities) {
       for (const b of aliveEntities) {
         if (a.id === b.id) continue;
-        if (Math.abs(a.x - b.x) > 400 || Math.abs(a.y - b.y) > 400) continue;
+        const bRadiusMul = b.radiusMul || 1;
+        const hitDist = SIM_SEGMENT_R * 1.3 * bRadiusMul;
+        const hitDistSq = hitDist * hitDist;
+        const reach = 400 + hitDist;
+        if (Math.abs(a.x - b.x) > reach || Math.abs(a.y - b.y) > reach) continue;
 
         for (let i = 3; i < b.segments.length; i++) {
           const seg = b.segments[i];
           const dx = seg.x - a.x, dy = seg.y - a.y;
           if (dx * dx + dy * dy < hitDistSq) {
             a.alive = false;
-            if (!b.isAI) b.score += SIM_POINTS_PER_KILL;
+            if (!b.isAI) {
+              // scoreMul rewards killing a tougher/rarer species more —
+              // matches single-player's kill-scoring exactly (a Titan
+              // kill is worth 5x a baseline Viper kill).
+              const killedMul = a.isAI && a.scoreMul ? a.scoreMul : 1;
+              b.score += Math.round(SIM_POINTS_PER_KILL * killedMul);
+            }
+            if (a.isBoss) this._bossActiveId = null; // let the boss timer start counting down again immediately
             break;
           }
         }
@@ -300,13 +585,24 @@ class Simulation {
       }
     }
 
-    // AI respawn
+    // AI respawn — bosses are excluded; a dead Titan just clears
+    // _bossActiveId (done in the collision loop above) and the normal
+    // boss timer in _tick starts counting down toward the next one,
+    // rather than an immediate respawn like regular AI gets.
     for (const snake of this.entities.values()) {
-      if (snake.isAI && !snake.alive) {
+      if (snake.isAI && !snake.isBoss && !snake.alive) {
         snake._respawnTimer = (snake._respawnTimer || 0) + dt;
         if (snake._respawnTimer >= SIM_AI_RESPAWN_DELAY) {
           this.entities.delete(snake.id);
           this._spawnOneAI(snake.id);
+        }
+      } else if (snake.isBoss && !snake.alive) {
+        // Clean up the dead boss entity itself after a short delay (so
+        // its death is still visible in the final broadcast state before
+        // it disappears), rather than leaving a permanent dead entry.
+        snake._respawnTimer = (snake._respawnTimer || 0) + dt;
+        if (snake._respawnTimer >= SIM_AI_RESPAWN_DELAY) {
+          this.entities.delete(snake.id);
         }
       }
     }
@@ -335,40 +631,340 @@ class Simulation {
     this._broadcastState();
   }
 
-  // Simple 2-state AI brain: AVOID when another snake's body is
-  // dangerously close, otherwise WANDER with a slowly-changing random
-  // direction. Identical to server.js's version — see that file for the
-  // fuller reasoning comment on why SEEK_FOOD/FLEE/PURSUE were left out.
+  // ── Full AI brain, ported from game_part2.js's AISnake — sense (find
+  // nearby food/flee-target/pursue-target/wall-or-body danger), evaluate
+  // a hysteresis-gated FSM, compute a steering force for whichever state
+  // won, then turn toward it. Ported to flat {x,y} objects and
+  // dirX/dirY numbers throughout instead of single-player's Vector2
+  // class — same math, no Vector2 dependency in this file.
+  //
+  // Not ported: the "difficulty curve" (window._game._difficultyT in
+  // single-player) that sharpens AI awareness the longer a solo run
+  // goes — there's no equivalent per-match escalating timer concept
+  // here, so AI strength stays constant at its personality/species base
+  // for the whole multiplayer match. See the top-of-file comment for the
+  // other single-player-only piece that's intentionally left out
+  // (foodGrid — a plain array scan is used instead, food count is small
+  // enough here that the perf structure isn't needed).
   _steerAI(snake, dt) {
-    const avoidRadiusSq = SIM_AI_AVOID_RADIUS * SIM_AI_AVOID_RADIUS;
-    let nearestThreatDistSq = Infinity;
-    let threatX = 0, threatY = 0;
-    for (const other of this.entities.values()) {
-      if (other.id === snake.id || !other.alive) continue;
-      if (Math.abs(other.x - snake.x) > SIM_AI_AVOID_RADIUS * 2 || Math.abs(other.y - snake.y) > SIM_AI_AVOID_RADIUS * 2) continue;
-      for (let i = 0; i < other.segments.length; i += 3) {
-        const seg = other.segments[i];
-        const dx = seg.x - snake.x, dy = seg.y - snake.y;
-        const dSq = dx * dx + dy * dy;
-        if (dSq < nearestThreatDistSq) { nearestThreatDistSq = dSq; threatX = seg.x; threatY = seg.y; }
+    const sense = this._senseAI(snake);
+    this._evalAIState(snake, dt, sense);
+
+    const dangerWall = this._wallDangerForce(snake);
+    const dangerBody = this._bodyDangerForce(snake, sense);
+
+    let fx, fy, urgent;
+    if (dangerWall || dangerBody) {
+      if (dangerWall && dangerBody) {
+        fx = dangerWall.x + dangerBody.x;
+        fy = dangerWall.y + dangerBody.y;
+        const l = Math.hypot(fx, fy) || 1;
+        fx /= l; fy /= l;
+      } else {
+        const d = dangerWall || dangerBody;
+        fx = d.x; fy = d.y;
       }
-    }
-    if (nearestThreatDistSq < avoidRadiusSq) {
-      const dx = snake.x - threatX, dy = snake.y - threatY;
-      const dl = Math.hypot(dx, dy) || 1;
-      snake.inputDirX = dx / dl;
-      snake.inputDirY = dy / dl;
-      return;
+      urgent = true;
+    } else {
+      const normal = this._computeAIForce(snake, dt, sense);
+      const soft = this._wallAvoidForce(snake);
+      fx = normal.x + (soft ? soft.x : 0);
+      fy = normal.y + (soft ? soft.y : 0);
+      // Clamp to MAX_FORCE — same cap single-player applies to the
+      // normal (non-urgent) steering force.
+      const l = Math.hypot(fx, fy);
+      if (l > snake.MAX_FORCE) { fx = (fx / l) * snake.MAX_FORCE; fy = (fy / l) * snake.MAX_FORCE; }
+      urgent = false;
     }
 
-    snake._wanderT += dt;
-    if (snake._wanderT >= snake._nextWanderChange) {
-      snake._wanderT = 0;
-      snake._nextWanderChange = SIM_AI_WANDER_TURN_INTERVAL[0] + Math.random() * (SIM_AI_WANDER_TURN_INTERVAL[1] - SIM_AI_WANDER_TURN_INTERVAL[0]);
-      const angle = Math.random() * Math.PI * 2;
-      snake.inputDirX = Math.cos(angle);
-      snake.inputDirY = Math.sin(angle);
+    // Turn dir toward dir+force by lerpT, then feed the RESULT into
+    // inputDirX/Y — the shared movement step in _tick (used by both
+    // players and AI) does its own turnRate lerp on top of this every
+    // tick, so this sets AI's *target heading* rather than moving dirX/Y
+    // directly, keeping one single movement code path for everyone.
+    // (equivalent to single-player's dir.lerp(dir.add(force), lerpT),
+    // written out longhand since there's no Vector2.lerp here)
+    const lerpT = Math.min(1, snake.STEER_LERP * (urgent ? snake._urgentTurnMul : 1) * dt);
+    let ndx = snake.dirX + fx * lerpT;
+    let ndy = snake.dirY + fy * lerpT;
+    const ndl = Math.hypot(ndx, ndy) || 1;
+    ndx /= ndl; ndy /= ndl;
+
+    // Insects (ants) skitter — small fast wobble layered on top of
+    // normal steering. Matches single-player's insect jitter exactly.
+    if (snake.moveStyle === 'insect') {
+      snake._wiggleT += dt;
+      const jitterAngle = Math.sin(snake._wiggleT * 14) * 0.35 + Math.sin(snake._wiggleT * 31) * 0.18;
+      const cosA = Math.cos(jitterAngle), sinA = Math.sin(jitterAngle);
+      const jx = ndx * cosA - ndy * sinA;
+      const jy = ndx * sinA + ndy * cosA;
+      const jl = Math.hypot(jx, jy) || 1;
+      ndx = jx / jl; ndy = jy / jl;
     }
+
+    snake.inputDirX = ndx;
+    snake.inputDirY = ndy;
+  }
+
+  // Finds: food within FOOD_RADIUS, the closest snake big enough to
+  // flee, the closest snake small enough to pursue, and (via a short
+  // forward lookahead) a wall/body-avoidance steering normal. Matches
+  // single-player's _sense() exactly, adapted to flat objects/this.food.
+  _senseAI(snake) {
+    const foodRadiusSq = snake.FOOD_RADIUS * snake.FOOD_RADIUS;
+    const nearbyFood = [];
+    for (const f of this.food) {
+      const dx = f.x - snake.x, dy = f.y - snake.y;
+      if (dx * dx + dy * dy <= foodRadiusSq) nearbyFood.push(f);
+    }
+
+    let fleeTarget = null, pursueTarget = null;
+    let closestFleeDistSq = Infinity, closestPursueDistSq = Infinity;
+    const senseRSq = snake.SNAKE_SENSE_R * snake.SNAKE_SENSE_R;
+
+    for (const other of this.entities.values()) {
+      if (other.id === snake.id || !other.alive) continue;
+      const dx = other.x - snake.x, dy = other.y - snake.y;
+      const dsq = dx * dx + dy * dy;
+      if (dsq > senseRSq) continue;
+      const sizeDiff = other.length - snake.length;
+
+      if (snake.personality === 'hunter' && other.isPlayer && other.length < snake.length) {
+        if (dsq < closestPursueDistSq) { closestPursueDistSq = dsq; pursueTarget = other; }
+        continue;
+      }
+
+      if (sizeDiff > snake.fleeThreshold) {
+        if (dsq < closestFleeDistSq) { closestFleeDistSq = dsq; fleeTarget = other; }
+      } else if (sizeDiff < -snake.pursueThreshold) {
+        if (dsq < closestPursueDistSq) { closestPursueDistSq = dsq; pursueTarget = other; }
+      }
+    }
+
+    // Short forward lookahead for body-avoidance — probes a few points
+    // ahead along the current heading and checks them against every
+    // other snake's body, same as single-player's lookahead loop.
+    let avoidNormal = null;
+    const hitRad = SIM_SEGMENT_R * 2.2;
+    const hitRadSq = hitRad * hitRad;
+    outer:
+    for (let step = 1; step <= snake.LOOKAHEAD_STEPS; step++) {
+      const probeX = snake.x + snake.dirX * snake.LOOKAHEAD_DIST * step;
+      const probeY = snake.y + snake.dirY * snake.LOOKAHEAD_DIST * step;
+      for (const other of this.entities.values()) {
+        if (other.id === snake.id || !other.alive) continue;
+        const rangeSq = (snake.BODY_SENSE_R + other.length * SIM_SEGMENT_GAP) * (snake.BODY_SENSE_R + other.length * SIM_SEGMENT_GAP);
+        const dx0 = other.x - snake.x, dy0 = other.y - snake.y;
+        if (dx0 * dx0 + dy0 * dy0 > rangeSq) continue;
+        const segs = other.segments;
+        const stride = segs.length > 40 ? 2 : 1;
+        for (let si = 1; si < segs.length; si += stride) {
+          const seg = segs[si];
+          const dx = probeX - seg.x, dy = probeY - seg.y;
+          if (dx * dx + dy * dy < hitRadSq) {
+            const dot = -snake.dirY * dx + snake.dirX * dy;
+            const sign = dot >= 0 ? 1 : -1;
+            avoidNormal = { x: -snake.dirY * sign, y: snake.dirX * sign };
+            break outer;
+          }
+        }
+      }
+    }
+
+    snake._fleeTarget = fleeTarget;
+    snake._pursueTarget = pursueTarget;
+    snake._avoidNormal = avoidNormal;
+    return { nearbyFood, fleeTarget, pursueTarget, avoidNormal };
+  }
+
+  // Hysteresis-gated state machine — a condition has to hold for
+  // `enter` seconds before the FSM actually commits to that state, so
+  // borderline/flickering conditions don't cause the AI to twitch
+  // between states every tick. Priority order (checked top to bottom):
+  // AVOID > FLEE > PURSUE > SEEK_FOOD > WANDER, matching single-player.
+  _evalAIState(snake, dt, sense) {
+    const tick = (key, cond) => {
+      if (cond) snake._hyst[key] = Math.min(snake._hyst[key] + dt, SIM_HYSTERESIS[key].enter + 0.1);
+      else snake._hyst[key] = Math.max(0, snake._hyst[key] - dt);
+    };
+    tick('AVOID', sense.avoidNormal !== null);
+    tick('FLEE', sense.fleeTarget !== null);
+    tick('PURSUE', sense.pursueTarget !== null);
+    tick('SEEK_FOOD', sense.nearbyFood.length > 0);
+
+    if (snake._hyst.AVOID >= SIM_HYSTERESIS.AVOID.enter) { snake.state = SIM_AI_STATE.AVOID; return; }
+    if (snake._hyst.FLEE >= SIM_HYSTERESIS.FLEE.enter) { snake.state = SIM_AI_STATE.FLEE; return; }
+    if (snake._hyst.PURSUE >= SIM_HYSTERESIS.PURSUE.enter) { snake.state = SIM_AI_STATE.PURSUE; return; }
+    if (snake._hyst.SEEK_FOOD >= SIM_HYSTERESIS.SEEK_FOOD.enter) { snake.state = SIM_AI_STATE.SEEK_FOOD; return; }
+    snake.state = SIM_AI_STATE.WANDER;
+  }
+
+  // seek/flee/pursue/evade/wander — same steering-behavior formulas as
+  // single-player, operating on {x,y} plain objects instead of Vector2.
+  _aiSeek(snake, targetX, targetY) {
+    const dx = targetX - snake.x, dy = targetY - snake.y;
+    const l = Math.hypot(dx, dy) || 1;
+    return { x: dx / l - snake.dirX, y: dy / l - snake.dirY };
+  }
+  _aiFlee(snake, targetX, targetY) {
+    const s = this._aiSeek(snake, targetX, targetY);
+    return { x: -s.x, y: -s.y };
+  }
+  _aiPursue(snake, target) {
+    const dx = target.x - snake.x, dy = target.y - snake.y;
+    const dist = Math.hypot(dx, dy);
+    const speed = snake._lastSpeed || SIM_BASE_SPEED;
+    const lookAheadT = Math.min(dist / speed, 1.5);
+    const tSpeed = target._lastSpeed || SIM_BASE_SPEED;
+    const fx = dist > 60 ? target.x + target.dirX * tSpeed * lookAheadT : target.x;
+    const fy = dist > 60 ? target.y + target.dirY * tSpeed * lookAheadT : target.y;
+    return this._aiSeek(snake, fx, fy);
+  }
+  _aiEvade(snake, threat) {
+    const dx = threat.x - snake.x, dy = threat.y - snake.y;
+    const dist = Math.hypot(dx, dy);
+    const speed = snake._lastSpeed || SIM_BASE_SPEED;
+    const lookAheadT = Math.min(dist / speed, 1.5);
+    const tSpeed = threat._lastSpeed || SIM_BASE_SPEED;
+    const fx = dist > 60 ? threat.x + threat.dirX * tSpeed * lookAheadT : threat.x;
+    const fy = dist > 60 ? threat.y + threat.dirY * tSpeed * lookAheadT : threat.y;
+    return this._aiFlee(snake, fx, fy);
+  }
+  _aiWander(snake, dt) {
+    snake._wanderAngle += (Math.random() - 0.5) * snake._wanderJitter * dt * 60;
+    const cx = snake.x + snake.dirX * snake._wanderDist;
+    const cy = snake.y + snake.dirY * snake._wanderDist;
+    const tx = cx + Math.cos(snake._wanderAngle) * snake._wanderRadius;
+    const ty = cy + Math.sin(snake._wanderAngle) * snake._wanderRadius;
+    return this._aiSeek(snake, tx, ty);
+  }
+
+  // Picks the steering force for whichever state _evalAIState landed on
+  // — farmer's food-priority override and aggressive flanking/flocking
+  // both take priority over the plain per-state switch, matching
+  // single-player's _computeForce exactly.
+  _computeAIForce(snake, dt, sense) {
+    if (snake.personality === 'farmer' && snake.state !== SIM_AI_STATE.FLEE && sense.nearbyFood.length > 0) {
+      let bestDsq = Infinity, target = null;
+      for (const f of sense.nearbyFood) {
+        const dx = f.x - snake.x, dy = f.y - snake.y;
+        const dsq = dx * dx + dy * dy;
+        if (dsq < bestDsq) { bestDsq = dsq; target = f; }
+      }
+      if (target) {
+        const s = this._aiSeek(snake, target.x, target.y);
+        return { x: s.x * 1.2, y: s.y * 1.2 };
+      }
+    }
+
+    if (snake.personality === 'aggressive' && sense.pursueTarget && snake.state === SIM_AI_STATE.PURSUE) {
+      const allies = [];
+      for (const other of this.entities.values()) {
+        if (other.id === snake.id || !other.alive || !other.isAI) continue;
+        if (other.personality !== 'aggressive' || other._pursueTarget !== sense.pursueTarget) continue;
+        const dx = other.x - snake.x, dy = other.y - snake.y;
+        if (dx * dx + dy * dy < 200 * 200) allies.push(other);
+      }
+      if (allies.length > 0) {
+        const base = this._aiPursue(snake, sense.pursueTarget);
+        const baseAngle = Math.atan2(base.y, base.x);
+        const perpAngle = baseAngle + Math.PI / 2;
+        return { x: Math.cos(perpAngle) - snake.dirX, y: Math.sin(perpAngle) - snake.dirY };
+      }
+    }
+
+    switch (snake.state) {
+      case SIM_AI_STATE.AVOID: {
+        if (sense.avoidNormal) return { x: sense.avoidNormal.x * 2.0, y: sense.avoidNormal.y * 2.0 };
+        const w = this._aiWander(snake, dt);
+        return { x: w.x * 0.6, y: w.y * 0.6 };
+      }
+      case SIM_AI_STATE.FLEE: {
+        if (sense.fleeTarget) {
+          const e = this._aiEvade(snake, sense.fleeTarget);
+          return { x: e.x * 1.8, y: e.y * 1.8 };
+        }
+        const w = this._aiWander(snake, dt);
+        return { x: w.x * 0.6, y: w.y * 0.6 };
+      }
+      case SIM_AI_STATE.PURSUE: {
+        if (sense.pursueTarget) {
+          const p = this._aiPursue(snake, sense.pursueTarget);
+          return { x: p.x * 1.2, y: p.y * 1.2 };
+        }
+        const w = this._aiWander(snake, dt);
+        return { x: w.x * 0.6, y: w.y * 0.6 };
+      }
+      case SIM_AI_STATE.SEEK_FOOD: {
+        let bestDsq = Infinity, target = null;
+        for (const f of sense.nearbyFood) {
+          const dx = f.x - snake.x, dy = f.y - snake.y;
+          const dsq = dx * dx + dy * dy;
+          if (dsq < bestDsq) { bestDsq = dsq; target = f; }
+        }
+        if (target) return this._aiSeek(snake, target.x, target.y);
+        const w = this._aiWander(snake, dt);
+        return { x: w.x * 0.6, y: w.y * 0.6 };
+      }
+      default: {
+        const w = this._aiWander(snake, dt);
+        return { x: w.x * 0.6, y: w.y * 0.6 };
+      }
+    }
+  }
+
+  // Soft steering: gently curves away from the boundary well before real
+  // danger. Matches single-player's _wallAvoidForce exactly.
+  _wallAvoidForce(snake) {
+    const MARGIN_OUTER = 220, MARGIN_INNER = 80;
+    let px = 0, py = 0;
+    const push = (dist) => dist < MARGIN_OUTER ? (1 - Math.max(0, (dist - MARGIN_INNER) / (MARGIN_OUTER - MARGIN_INNER))) : 0;
+    px += push(snake.x); px -= push(SIM_WORLD_W - snake.x);
+    py += push(snake.y); py -= push(SIM_WORLD_H - snake.y);
+    if (px === 0 && py === 0) return null;
+    const l = Math.hypot(px, py);
+    return { x: (px / l) * 0.3, y: (py / l) * 0.3 };
+  }
+
+  // Hard-priority override: fires only when genuinely close to the
+  // boundary. Matches single-player's _wallDangerForce exactly.
+  _wallDangerForce(snake) {
+    const DANGER = 70;
+    const distToEdge = Math.min(snake.x, SIM_WORLD_W - snake.x, snake.y, SIM_WORLD_H - snake.y);
+    if (distToEdge >= DANGER) return null;
+    const cx = SIM_WORLD_W / 2, cy = SIM_WORLD_H / 2;
+    const dx = cx - snake.x, dy = cy - snake.y;
+    const l = Math.hypot(dx, dy);
+    if (l < 1e-6) return { x: snake.dirX, y: snake.dirY };
+    return { x: dx / l, y: dy / l };
+  }
+
+  // Hard-priority override: fires only when a lookahead probe already
+  // found a body this close (see _senseAI's avoidNormal probe, which
+  // uses a looser radius for the soft AVOID state) — this is the
+  // last-resort "about to actually hit something" case. Matches
+  // single-player's _bodyDangerForce exactly.
+  _bodyDangerForce(snake, sense) {
+    const DANGER_DIST = SIM_SEGMENT_R * 3.2;
+    const dangerDsq = DANGER_DIST * DANGER_DIST;
+    for (const other of this.entities.values()) {
+      if (other.id === snake.id || !other.alive) continue;
+      const rangeSq = (snake.BODY_SENSE_R + other.length * SIM_SEGMENT_GAP) * (snake.BODY_SENSE_R + other.length * SIM_SEGMENT_GAP);
+      const dx0 = other.x - snake.x, dy0 = other.y - snake.y;
+      if (dx0 * dx0 + dy0 * dy0 > rangeSq) continue;
+      const segs = other.segments;
+      const stride = segs.length > 40 ? 2 : 1;
+      for (let i = 1; i < segs.length; i += stride) {
+        const seg = segs[i];
+        const dx = snake.x - seg.x, dy = snake.y - seg.y;
+        if (dx * dx + dy * dy < dangerDsq) {
+          const l = Math.hypot(dx, dy);
+          if (l < 1e-6) continue;
+          return { x: dx / l, y: dy / l };
+        }
+      }
+    }
+    return null;
   }
 
   _broadcastState() {
@@ -383,6 +979,15 @@ class Simulation {
       score: snake.score || 0,
       lives: snake.isAI ? null : snake.lives,
       segments: snake.segments,
+      // Species/personality — used by mp.js to render AI at the right
+      // size (radiusMul) and pick species-appropriate visuals (a Titan
+      // should look and feel unmistakably different from a Hatchling).
+      // null/undefined for real players, who have no species.
+      species: snake.species || null,
+      speciesLabel: snake.speciesLabel || null,
+      radiusMul: snake.radiusMul || 1,
+      isBoss: !!snake.isBoss,
+      moveStyle: snake.moveStyle || null,
     }));
 
     this.onState({ type: 'state', food: this.food, snakes });
