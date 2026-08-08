@@ -24,11 +24,25 @@ const Net = (() => {
   const ROOM_CODE_LEN = 5;
   const PEER_ID_PREFIX = 'snakerush-';
 
-  // Google's public STUN servers — used only to discover each peer's
-  // public IP/port for the WebRTC handshake, never touches game data.
+  // STUN discovers each peer's public IP/port so two browsers can try a
+  // direct connection — this alone is enough for most home WiFi setups.
+  // TURN is the fallback when that direct path can't be found at all
+  // (symmetric/carrier-grade NAT — common on mobile data, and common
+  // whenever the two players are on different networks rather than the
+  // same WiFi). Without a TURN entry here, that failure is silent: ICE
+  // gathering completes, a connection object exists, but no candidate
+  // pair ever actually works, so both sides just sit at "waiting for
+  // friend" forever with no error to point at. TURN relays the actual
+  // data through Metered's server instead of requiring a direct path,
+  // at the cost of a little added latency versus a true P2P connection.
   const ICE_SERVERS = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun.relay.metered.ca:80' },
+    { urls: 'turn:global.relay.metered.ca:80', username: 'a7b31c3fef07fa4fdec6fcd4', credential: 'RiH5OYMx/VQjn+xA' },
+    { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: 'a7b31c3fef07fa4fdec6fcd4', credential: 'RiH5OYMx/VQjn+xA' },
+    { urls: 'turn:global.relay.metered.ca:443', username: 'a7b31c3fef07fa4fdec6fcd4', credential: 'RiH5OYMx/VQjn+xA' },
+    { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: 'a7b31c3fef07fa4fdec6fcd4', credential: 'RiH5OYMx/VQjn+xA' },
   ];
 
   let peer = null;
